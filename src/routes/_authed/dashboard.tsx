@@ -11,6 +11,7 @@ import { Button } from '~/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '~/components/ui/card'
 import { Input } from '~/components/ui/input'
 import { Textarea } from '~/components/ui/textarea'
+import { DeleteSandboxModal } from '~/components/delete-sandbox-modal'
 import { SandboxCard } from '~/components/sandbox-card'
 import {
   checkGithubConnection,
@@ -73,6 +74,9 @@ function DashboardRoute() {
   const [selectedGithubRepoFullName, setSelectedGithubRepoFullName] = useState<
     string | null
   >(null)
+  const [deleteModalSandboxId, setDeleteModalSandboxId] = useState<string | null>(
+    null,
+  )
   const githubRepos = githubReposQuery.data ?? []
   const githubReposError =
     githubReposQuery.error instanceof Error ? githubReposQuery.error.message : null
@@ -461,12 +465,29 @@ function DashboardRoute() {
                 key={sandbox._id}
                 sandbox={sandbox}
                 isBusy={busySandboxId === sandbox._id}
-                onDelete={() => handleDeleteSandbox(sandbox._id)}
+                onDelete={() => setDeleteModalSandboxId(sandbox._id)}
                 onRestart={() => handleRestartSandbox(sandbox._id)}
               />
             ))}
           </div>
         )}
+
+        <DeleteSandboxModal
+          open={deleteModalSandboxId !== null}
+          onOpenChange={(open) => {
+            if (!open) setDeleteModalSandboxId(null)
+          }}
+          onConfirm={async () => {
+            if (deleteModalSandboxId) {
+              await handleDeleteSandbox(deleteModalSandboxId)
+            }
+          }}
+          sandboxName={
+            deleteModalSandboxId
+              ? sandboxes.find((s) => s._id === deleteModalSandboxId)?.repoName
+              : undefined
+          }
+        />
       </section>
     </main>
   )

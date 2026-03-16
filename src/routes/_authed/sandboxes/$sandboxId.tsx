@@ -4,6 +4,7 @@ import { createFileRoute, Link, useNavigate } from '@tanstack/react-router'
 import { useQueryClient, useSuspenseQuery } from '@tanstack/react-query'
 import { api } from 'convex/_generated/api'
 import type { Id } from 'convex/_generated/dataModel'
+import { DeleteSandboxModal } from '~/components/delete-sandbox-modal'
 import { Alert, AlertDescription } from '~/components/ui/alert'
 import { Badge } from '~/components/ui/badge'
 import { Button } from '~/components/ui/button'
@@ -95,6 +96,7 @@ function SandboxDetailRoute() {
   const [webTerminalError, setWebTerminalError] = useState<string | null>(null)
   const [isWebTerminalLoading, setIsWebTerminalLoading] = useState(false)
   const [webTerminalUrl, setWebTerminalUrl] = useState<string | null>(null)
+  const [showDeleteModal, setShowDeleteModal] = useState(false)
   const edgeSwipeStartX = useRef<number | null>(null)
   const panelSwipeStartX = useRef<number | null>(null)
   const previewBootAttemptKeyRef = useRef<string | null>(null)
@@ -422,7 +424,7 @@ function SandboxDetailRoute() {
               </Button>
               <Button
                 variant="destructive"
-                onClick={handleDelete}
+                onClick={() => setShowDeleteModal(true)}
                 disabled={isBusy}
                 className="border-2 border-foreground text-sm font-bold uppercase shadow-[2px_2px_0_var(--foreground)] hover:translate-x-[1px] hover:translate-y-[1px] hover:shadow-none"
               >
@@ -782,6 +784,13 @@ function SandboxDetailRoute() {
           </div>
         </aside>
       </div>
+
+      <DeleteSandboxModal
+        open={showDeleteModal}
+        onOpenChange={setShowDeleteModal}
+        onConfirm={handleDelete}
+        sandboxName={sandbox.repoName}
+      />
     </main>
   )
 }
