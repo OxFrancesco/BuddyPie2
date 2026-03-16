@@ -9,6 +9,7 @@
  */
 
 import type * as lib_auth from "../lib/auth.js";
+import type * as billing from "../billing.js";
 import type * as sandboxes from "../sandboxes.js";
 import type * as user from "../user.js";
 
@@ -19,6 +20,7 @@ import type {
 } from "convex/server";
 
 declare const fullApi: ApiFromModules<{
+  billing: typeof billing;
   "lib/auth": typeof lib_auth;
   sandboxes: typeof sandboxes;
   user: typeof user;
