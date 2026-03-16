@@ -42,10 +42,11 @@ http.route({
       grossTokenAmount?: string
       metadataJson?: string
     }
+    const amountUsdCents = body.amountUsdCents
 
     if (
-      !Number.isInteger(body.amountUsdCents) ||
-      body.amountUsdCents <= 0 ||
+      !Number.isInteger(amountUsdCents) ||
+      amountUsdCents <= 0 ||
       !body.paymentReference ||
       !body.idempotencyKey ||
       !body.source
@@ -56,7 +57,6 @@ http.route({
       )
     }
 
-    const amountUsdCents = body.amountUsdCents as number
     const paymentReference = body.paymentReference as string
     const idempotencyKey = body.idempotencyKey as string
     const source = body.source as 'manual_testnet' | 'x402_settled'

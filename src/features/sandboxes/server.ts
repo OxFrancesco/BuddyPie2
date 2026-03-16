@@ -386,7 +386,7 @@ export const createSandbox = createServerFn({ method: 'POST' })
 export const deleteSandbox = createServerFn({ method: 'POST' })
   .inputValidator((data: SandboxMutationInput) => data)
   .handler(async ({ data }) => {
-    const { convex, convexUrl, token } = await getAuthenticatedConvexClient()
+    const { convex } = await getAuthenticatedConvexClient()
     const sandbox = await convex.query(api.sandboxes.get, {
       sandboxId: data.sandboxId as Id<'sandboxes'>,
     })
@@ -420,7 +420,7 @@ export const ensureAppPreviewServer = createServerFn({ method: 'POST' })
       throw new Error('Choose a valid preview port between 1 and 65535.')
     }
 
-    const { convex } = await getAuthenticatedConvexClient()
+    const { convex, convexUrl, token } = await getAuthenticatedConvexClient()
     const sandbox = await convex.query(api.sandboxes.get, {
       sandboxId: data.sandboxId as Id<'sandboxes'>,
     })
@@ -466,7 +466,7 @@ export const getAppPreviewLogs = createServerFn({ method: 'POST' })
       throw new Error('Choose a valid preview port between 1 and 65535.')
     }
 
-    const { convex, convexUrl, token } = await getAuthenticatedConvexClient()
+    const { convex } = await getAuthenticatedConvexClient()
     const sandbox = await convex.query(api.sandboxes.get, {
       sandboxId: data.sandboxId as Id<'sandboxes'>,
     })
@@ -492,7 +492,7 @@ export const getAppPreviewLogs = createServerFn({ method: 'POST' })
 export const createTerminalAccess = createServerFn({ method: 'POST' })
   .inputValidator((data: CreateTerminalAccessInput) => data)
   .handler(async ({ data }) => {
-    const { convex } = await getAuthenticatedConvexClient()
+    const { convex, convexUrl, token } = await getAuthenticatedConvexClient()
     const sandbox = await convex.query(api.sandboxes.get, {
       sandboxId: data.sandboxId as Id<'sandboxes'>,
     })
