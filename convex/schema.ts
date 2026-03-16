@@ -123,6 +123,7 @@ export default defineSchema({
   })
     .index('by_user_and_status', ['userId', 'status'])
     .index('by_agent_reserve_and_status', ['agentReserveId', 'status'])
+    .index('by_status_and_expires_at', ['status', 'expiresAt'])
     .index('by_idempotency_key', ['idempotencyKey']),
 
   usageEvents: defineTable({

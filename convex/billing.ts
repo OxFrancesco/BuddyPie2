@@ -38,6 +38,12 @@ const usageEventTypeValidator = v.union(
   v.literal('web_terminal'),
 )
 
+const runtimeUsageEventTypeValidator = v.union(
+  v.literal('preview_boot'),
+  v.literal('ssh_access'),
+  v.literal('web_terminal'),
+)
+
 const reserveLeasePurposeValidator = v.union(
   v.literal('sandbox_launch'),
   v.literal('preview_boot'),
@@ -275,7 +281,7 @@ export const allocateReserve = mutation({
 export const createSandboxEventLease = mutation({
   args: {
     sandboxId: v.id('sandboxes'),
-    eventType: usageEventTypeValidator,
+    eventType: runtimeUsageEventTypeValidator,
     idempotencyKey: v.string(),
     quantitySummary: v.optional(v.string()),
   },
@@ -308,7 +314,7 @@ export const captureSandboxEventLease = mutation({
   args: {
     leaseId: v.id('reserveLeases'),
     sandboxId: v.id('sandboxes'),
-    eventType: usageEventTypeValidator,
+    eventType: runtimeUsageEventTypeValidator,
     idempotencyKey: v.string(),
     description: v.string(),
     quantitySummary: v.optional(v.string()),
@@ -325,6 +331,18 @@ export const captureSandboxEventLease = mutation({
 
     if (!sandbox || sandbox.userId !== user._id) {
       throw new ConvexError('Sandbox not found.')
+    }
+
+    if (lease.sandboxId !== sandbox._id) {
+      throw new ConvexError('Reserve lease does not belong to this sandbox.')
+    }
+
+    if (lease.purpose !== args.eventType) {
+      throw new ConvexError('Reserve lease purpose does not match the event type.')
+    }
+
+    if (sandbox.agentReserveId && lease.agentReserveId !== sandbox.agentReserveId) {
+      throw new ConvexError('Reserve lease does not match the sandbox reserve.')
     }
 
     return await captureReserveLeaseUsage(ctx, {
@@ -353,5 +371,32 @@ export const releaseLease = mutation({
     }
 
     return await releaseReserveLease(ctx, args)
+  },
+})
+
+export const expireActiveLeases = internalMutation({
+  args: {},
+  returns: v.object({
+    expiredLeaseCount: v.number(),
+  }),
+  handler: async (ctx) => {
+    const now = Date.now()
+    const expiredLeases = await ctx.db
+      .query('reserveLeases')
+      .withIndex('by_status_and_expires_at', (q) =>
+        q.eq('status', 'active').lt('expiresAt', now),
+      )
+      .take(50)
+
+    for (const lease of expiredLeases) {
+      await releaseReserveLease(ctx, {
+        leaseId: lease._id,
+        reason: `Lease expired at ${new Date(lease.expiresAt).toISOString()}`,
+      })
+    }
+
+    return {
+      expiredLeaseCount: expiredLeases.length,
+    }
   },
 })
