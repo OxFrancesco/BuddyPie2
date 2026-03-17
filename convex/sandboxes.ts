@@ -3,6 +3,12 @@ import { mutation, query } from './_generated/server'
 import type { Doc, Id } from './_generated/dataModel'
 import type { MutationCtx } from './_generated/server'
 import { getCurrentUserRecord, requireCurrentUserRecord } from './lib/auth'
+import {
+  captureReserveLeaseUsage,
+  createReserveLease,
+  getUsageEventCostUsdCents,
+  releaseReserveLease,
+} from './lib/billing'
 
 export const sandboxRecordValidator = v.object({
   _id: v.id('sandboxes'),
@@ -28,6 +34,10 @@ export const sandboxRecordValidator = v.object({
   previewUrlPattern: v.optional(v.string()),
   workspacePath: v.optional(v.string()),
   errorMessage: v.optional(v.string()),
+  agentReserveId: v.optional(v.id('agentReserves')),
+  launchLeaseId: v.optional(v.id('reserveLeases')),
+  billedUsdCents: v.optional(v.number()),
+  lastBilledAt: v.optional(v.number()),
   createdAt: v.number(),
   updatedAt: v.number(),
 })
@@ -116,6 +126,25 @@ export const createPending = mutation({
       updatedAt: now,
       ...(args.repoBranch ? { repoBranch: args.repoBranch } : {}),
       ...(args.initialPrompt ? { initialPrompt: args.initialPrompt } : {}),
+      billedUsdCents: 0,
+    })
+    const launchLease = await createReserveLease(ctx, {
+      userId: user._id,
+      agentPresetId: args.agentPresetId,
+      amountUsdCents: getUsageEventCostUsdCents(
+        args.agentPresetId,
+        'sandbox_launch',
+      ),
+      purpose: 'sandbox_launch',
+      idempotencyKey: `sandbox-launch:${sandboxId}`,
+      workerKey: 'buddypie:sandbox-launch',
+      sandboxId,
+    })
+
+    await ctx.db.patch(sandboxId, {
+      agentReserveId: launchLease.agentReserveId,
+      launchLeaseId: launchLease._id,
+      updatedAt: now,
     })
 
     const sandbox = await ctx.db.get(sandboxId)
@@ -139,7 +168,22 @@ export const markReady = mutation({
   },
   returns: sandboxRecordValidator,
   handler: async (ctx, args) => {
-    await getOwnedSandbox(ctx, args.sandboxId)
+    const sandbox = await getOwnedSandbox(ctx, args.sandboxId)
+
+    if (sandbox.launchLeaseId) {
+      await captureReserveLeaseUsage(ctx, {
+        leaseId: sandbox.launchLeaseId,
+        sandboxId: sandbox._id,
+        eventType: 'sandbox_launch',
+        description: `OpenCode sandbox launch for ${sandbox.repoName}`,
+        quantitySummary: sandbox.repoBranch ?? 'default branch',
+        idempotencyKey: `sandbox-launch-capture:${sandbox._id}`,
+        costUsdCents: getUsageEventCostUsdCents(
+          sandbox.agentPresetId ?? 'general-engineer',
+          'sandbox_launch',
+        ),
+      })
+    }
 
     await ctx.db.patch(args.sandboxId, {
       status: 'ready',
@@ -151,13 +195,13 @@ export const markReady = mutation({
       updatedAt: Date.now(),
     })
 
-    const sandbox = await ctx.db.get(args.sandboxId)
+    const updatedSandbox = await ctx.db.get(args.sandboxId)
 
-    if (!sandbox) {
+    if (!updatedSandbox) {
       throw new ConvexError('Sandbox not found after launch.')
     }
 
-    return sandbox
+    return updatedSandbox
   },
 })
 
@@ -168,7 +212,14 @@ export const markFailed = mutation({
   },
   returns: sandboxRecordValidator,
   handler: async (ctx, args) => {
-    await getOwnedSandbox(ctx, args.sandboxId)
+    const sandbox = await getOwnedSandbox(ctx, args.sandboxId)
+
+    if (sandbox.launchLeaseId) {
+      await releaseReserveLease(ctx, {
+        leaseId: sandbox.launchLeaseId,
+        reason: `Launch failed for ${sandbox.repoName}`,
+      })
+    }
 
     await ctx.db.patch(args.sandboxId, {
       status: 'failed',
@@ -176,13 +227,13 @@ export const markFailed = mutation({
       updatedAt: Date.now(),
     })
 
-    const sandbox = await ctx.db.get(args.sandboxId)
+    const updatedSandbox = await ctx.db.get(args.sandboxId)
 
-    if (!sandbox) {
+    if (!updatedSandbox) {
       throw new ConvexError('Sandbox not found after failure.')
     }
 
-    return sandbox
+    return updatedSandbox
   },
 })
 

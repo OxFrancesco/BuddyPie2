@@ -4,6 +4,7 @@ import type { Id } from 'convex/_generated/dataModel'
 import type { CreateSandboxInput } from '~/lib/sandboxes'
 import { getSafeOpenCodeAgentPreset } from '~/lib/opencode/presets'
 import { normalizeSandboxInput } from '~/lib/sandboxes'
+import { getAuthenticatedConvexClient } from '~/lib/server/authenticated-convex'
 
 type SandboxMutationInput = {
   sandboxId: string
@@ -68,37 +69,6 @@ function getErrorMessage(error: unknown) {
   }
 
   return 'Something went wrong while talking to Daytona.'
-}
-
-async function getAuthenticatedConvexClient() {
-  const [{ auth }, { ConvexHttpClient }] = await Promise.all([
-    import('@clerk/tanstack-react-start/server'),
-    import('convex/browser'),
-  ])
-  const session = await auth()
-
-  if (!session.userId) {
-    throw new Error('You must be signed in to continue.')
-  }
-
-  const token = await session.getToken({ template: 'convex' })
-  const convexUrl = process.env.VITE_CONVEX_URL
-
-  if (!token) {
-    throw new Error('Your Convex auth token could not be created.')
-  }
-
-  if (!convexUrl) {
-    throw new Error('VITE_CONVEX_URL is not configured on the server.')
-  }
-
-  const convex = new ConvexHttpClient(convexUrl)
-  convex.setAuth(token)
-
-  return {
-    convex,
-    userId: session.userId,
-  }
 }
 
 async function getGithubAccessToken(userId: string) {
@@ -169,6 +139,121 @@ function resolveSandboxPreset(input: {
     agentProvider: input.agentProvider ?? preset.provider,
     agentModel: input.agentModel ?? preset.model,
     initialPrompt: input.initialPrompt?.trim() || preset.starterPrompt,
+  }
+}
+
+async function withSandboxEventLease<T>(args: {
+  convexUrl: string
+  token: string
+  sandboxId: Id<'sandboxes'>
+  eventType: 'preview_boot' | 'ssh_access' | 'web_terminal'
+  quantitySummary?: string
+  idempotencyKey: string
+  description: string
+  action: () => Promise<T>
+  shouldCapture?: (result: T) => boolean
+  releaseReason?: string
+}) {
+  const leaseResponse = await fetch(`${args.convexUrl}/billing/leases/create`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${args.token}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      sandboxId: args.sandboxId,
+      eventType: args.eventType,
+      idempotencyKey: args.idempotencyKey,
+      quantitySummary: args.quantitySummary,
+    }),
+  })
+
+  if (!leaseResponse.ok) {
+    const error = (await leaseResponse.json().catch(() => null)) as
+      | { error?: string }
+      | null
+
+    throw new Error(error?.error ?? `Could not create ${args.eventType} lease.`)
+  }
+
+  const lease = (await leaseResponse.json()) as { _id: string }
+
+  try {
+    const result = await args.action()
+
+    if (args.shouldCapture && !args.shouldCapture(result)) {
+      const releaseResponse = await fetch(
+        `${args.convexUrl}/billing/leases/release`,
+        {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${args.token}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            leaseId: lease._id,
+            reason: args.releaseReason ?? `No charge captured for ${args.eventType}.`,
+          }),
+        },
+      )
+
+      if (!releaseResponse.ok) {
+        const error = (await releaseResponse.json().catch(() => null)) as
+          | { error?: string }
+          | null
+
+        throw new Error(error?.error ?? `Could not release ${args.eventType} lease.`)
+      }
+
+      return result
+    }
+
+    const captureResponse = await fetch(
+      `${args.convexUrl}/billing/leases/capture`,
+      {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${args.token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          leaseId: lease._id,
+          sandboxId: args.sandboxId,
+          eventType: args.eventType,
+          idempotencyKey: `capture:${args.idempotencyKey}`,
+          description: args.description,
+          quantitySummary: args.quantitySummary,
+        }),
+      },
+    )
+
+    if (!captureResponse.ok) {
+      const error = (await captureResponse.json().catch(() => null)) as
+        | { error?: string }
+        | null
+
+      throw new Error(error?.error ?? `Could not capture ${args.eventType} lease.`)
+    }
+
+    return result
+  } catch (error) {
+    try {
+      await fetch(`${args.convexUrl}/billing/leases/release`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${args.token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          leaseId: lease._id,
+          reason: args.releaseReason ?? `${args.eventType} failed before capture.`,
+        }),
+      })
+    } catch {
+      // Best effort cleanup if the action throws after the lease is held.
+    }
+
+    throw error
   }
 }
 
@@ -335,7 +420,7 @@ export const ensureAppPreviewServer = createServerFn({ method: 'POST' })
       throw new Error('Choose a valid preview port between 1 and 65535.')
     }
 
-    const { convex } = await getAuthenticatedConvexClient()
+    const { convex, convexUrl, token } = await getAuthenticatedConvexClient()
     const sandbox = await convex.query(api.sandboxes.get, {
       sandboxId: data.sandboxId as Id<'sandboxes'>,
     })
@@ -348,12 +433,27 @@ export const ensureAppPreviewServer = createServerFn({ method: 'POST' })
       throw new Error('Sandbox runtime is not ready for app preview yet.')
     }
 
+    const daytonaSandboxId = sandbox.daytonaSandboxId
+    const workspacePath = sandbox.workspacePath
     const { ensureSandboxAppPreviewServer } = await import('~/lib/server/daytona')
+    const previewAttemptKey = `preview-boot:${sandbox._id}:${port}:${Date.now()}`
 
-    return await ensureSandboxAppPreviewServer({
-      daytonaSandboxId: sandbox.daytonaSandboxId,
-      workspacePath: sandbox.workspacePath,
-      port,
+    return await withSandboxEventLease({
+      convexUrl,
+      token,
+      sandboxId: sandbox._id,
+      eventType: 'preview_boot',
+      idempotencyKey: previewAttemptKey,
+      quantitySummary: `port:${port}`,
+      description: `Preview boot on port ${port}`,
+      shouldCapture: (result) => result.status === 'started',
+      releaseReason: `Preview server on port ${port} did not need a new boot charge.`,
+      action: async () =>
+        await ensureSandboxAppPreviewServer({
+          daytonaSandboxId,
+          workspacePath,
+          port,
+        }),
     })
   })
 
@@ -392,7 +492,7 @@ export const getAppPreviewLogs = createServerFn({ method: 'POST' })
 export const createTerminalAccess = createServerFn({ method: 'POST' })
   .inputValidator((data: CreateTerminalAccessInput) => data)
   .handler(async ({ data }) => {
-    const { convex } = await getAuthenticatedConvexClient()
+    const { convex, convexUrl, token } = await getAuthenticatedConvexClient()
     const sandbox = await convex.query(api.sandboxes.get, {
       sandboxId: data.sandboxId as Id<'sandboxes'>,
     })
@@ -405,11 +505,24 @@ export const createTerminalAccess = createServerFn({ method: 'POST' })
       throw new Error('Sandbox runtime is not ready for terminal access yet.')
     }
 
+    const daytonaSandboxId = sandbox.daytonaSandboxId
     const { createSandboxSshAccessCommand } = await import('~/lib/server/daytona')
+    const sshAttemptKey = `ssh-access:${sandbox._id}:${Date.now()}`
 
-    return await createSandboxSshAccessCommand({
-      daytonaSandboxId: sandbox.daytonaSandboxId,
-      expiresInMinutes: data.expiresInMinutes,
+    return await withSandboxEventLease({
+      convexUrl,
+      token,
+      sandboxId: sandbox._id,
+      eventType: 'ssh_access',
+      idempotencyKey: sshAttemptKey,
+      quantitySummary: `expires:${data.expiresInMinutes ?? 60}`,
+      description: 'Generated Daytona SSH access.',
+      releaseReason: 'SSH access generation failed before capture.',
+      action: async () =>
+        await createSandboxSshAccessCommand({
+          daytonaSandboxId,
+          expiresInMinutes: data.expiresInMinutes,
+        }),
     })
   })
 
@@ -422,7 +535,7 @@ export const getPortPreview = createServerFn({ method: 'POST' })
       throw new Error('Choose a valid preview port between 1 and 65535.')
     }
 
-    const { convex } = await getAuthenticatedConvexClient()
+    const { convex, convexUrl, token } = await getAuthenticatedConvexClient()
     const sandbox = await convex.query(api.sandboxes.get, {
       sandboxId: data.sandboxId as Id<'sandboxes'>,
     })
@@ -435,10 +548,31 @@ export const getPortPreview = createServerFn({ method: 'POST' })
       throw new Error('Sandbox runtime is not ready for preview access yet.')
     }
 
+    const daytonaSandboxId = sandbox.daytonaSandboxId
     const { getSandboxPortPreviewUrl } = await import('~/lib/server/daytona')
 
+    if (port === 22222) {
+      const terminalAttemptKey = `web-terminal:${sandbox._id}:${port}:${Date.now()}`
+
+      return await withSandboxEventLease({
+        convexUrl,
+        token,
+        sandboxId: sandbox._id,
+        eventType: 'web_terminal',
+        idempotencyKey: terminalAttemptKey,
+        quantitySummary: `port:${port}`,
+        description: 'Opened the Daytona web terminal.',
+        releaseReason: 'Web terminal access failed before capture.',
+        action: async () =>
+          await getSandboxPortPreviewUrl({
+            daytonaSandboxId,
+            port,
+          }),
+      })
+    }
+
     return await getSandboxPortPreviewUrl({
-      daytonaSandboxId: sandbox.daytonaSandboxId,
+      daytonaSandboxId,
       port,
     })
   })

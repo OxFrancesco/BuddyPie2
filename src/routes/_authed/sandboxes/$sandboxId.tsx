@@ -10,6 +10,7 @@ import { Badge } from '~/components/ui/badge'
 import { Button } from '~/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '~/components/ui/card'
 import { StatusPill } from '~/components/status-pill'
+import { formatUsdCents } from '~/lib/billing/format'
 import { getSafeOpenCodeAgentPreset } from '~/lib/opencode/presets'
 import {
   createTerminalAccess,
@@ -57,11 +58,18 @@ function formatDateTime(value?: string) {
 
 export const Route = createFileRoute('/_authed/sandboxes/$sandboxId')({
   loader: async ({ context, params }) => {
-    await context.queryClient.ensureQueryData(
-      convexQuery(api.sandboxes.get, {
-        sandboxId: params.sandboxId as Id<'sandboxes'>,
-      }),
-    )
+    await Promise.all([
+      context.queryClient.ensureQueryData(
+        convexQuery(api.sandboxes.get, {
+          sandboxId: params.sandboxId as Id<'sandboxes'>,
+        }),
+      ),
+      context.queryClient.ensureQueryData(
+        convexQuery(api.billing.sandboxUsage, {
+          sandboxId: params.sandboxId as Id<'sandboxes'>,
+        }),
+      ),
+    ])
   },
   component: SandboxDetailRoute,
 })
@@ -72,6 +80,11 @@ function SandboxDetailRoute() {
   const params = Route.useParams()
   const { data: sandbox } = useSuspenseQuery(
     convexQuery(api.sandboxes.get, {
+      sandboxId: params.sandboxId as Id<'sandboxes'>,
+    }),
+  )
+  const { data: sandboxUsage } = useSuspenseQuery(
+    convexQuery(api.billing.sandboxUsage, {
       sandboxId: params.sandboxId as Id<'sandboxes'>,
     }),
   )
@@ -108,6 +121,11 @@ function SandboxDetailRoute() {
       }),
       queryClient.invalidateQueries({
         queryKey: convexQuery(api.sandboxes.get, {
+          sandboxId: params.sandboxId as Id<'sandboxes'>,
+        }).queryKey,
+      }),
+      queryClient.invalidateQueries({
+        queryKey: convexQuery(api.billing.sandboxUsage, {
           sandboxId: params.sandboxId as Id<'sandboxes'>,
         }).queryKey,
       }),
@@ -493,6 +511,87 @@ function SandboxDetailRoute() {
               </p>
             </div>
           ) : null}
+
+          <div className="mt-4 border-2 border-foreground bg-muted p-4">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <p className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">
+                  Reserve Billing
+                </p>
+                <p className="mt-1 text-sm text-muted-foreground">
+                  Observable BuddyPie actions debit the preset reserve and appear
+                  here with a price version.
+                </p>
+              </div>
+              <Badge
+                variant="outline"
+                className="border-2 border-foreground font-bold uppercase tracking-widest"
+              >
+                Billed {formatUsdCents(sandboxUsage.billedUsdCents)}
+              </Badge>
+            </div>
+
+            <div className="mt-4 grid gap-3 md:grid-cols-3">
+              <div className="border-2 border-foreground bg-background p-3">
+                <p className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">
+                  Reserve available
+                </p>
+                <p className="mt-1 font-black">
+                  {formatUsdCents(sandboxUsage.reserve?.availableUsdCents ?? 0)}
+                </p>
+              </div>
+              <div className="border-2 border-foreground bg-background p-3">
+                <p className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">
+                  Held
+                </p>
+                <p className="mt-1 font-black">
+                  {formatUsdCents(sandboxUsage.reserve?.heldUsdCents ?? 0)}
+                </p>
+              </div>
+              <div className="border-2 border-foreground bg-background p-3">
+                <p className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">
+                  Lifetime spent
+                </p>
+                <p className="mt-1 font-black">
+                  {formatUsdCents(
+                    sandboxUsage.reserve?.spentUsdCentsLifetime ?? 0,
+                  )}
+                </p>
+              </div>
+            </div>
+
+            <div className="mt-4 space-y-2">
+              {sandboxUsage.usageEvents.length === 0 ? (
+                <p className="text-sm text-muted-foreground">
+                  No settled usage events yet.
+                </p>
+              ) : (
+                sandboxUsage.usageEvents.map((event) => (
+                  <div
+                    key={event._id}
+                    className="flex flex-col gap-2 border-2 border-foreground bg-background p-3 md:flex-row md:items-center md:justify-between"
+                  >
+                    <div>
+                      <p className="text-sm font-black uppercase">
+                        {event.eventType.replace(/_/g, ' ')}
+                      </p>
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        {event.description}
+                      </p>
+                    </div>
+                    <div className="text-left md:text-right">
+                      <p className="font-black">
+                        {formatUsdCents(event.costUsdCents)}
+                      </p>
+                      <p className="text-xs text-muted-foreground">
+                        {event.unitPriceVersion}
+                      </p>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
         </CardContent>
       </Card>
 

@@ -21,6 +21,7 @@ type SandboxCardProps = {
     previewUrl?: string
     errorMessage?: string
     workspacePath?: string
+    billedUsdCents?: number
   }
   isBusy?: boolean
   onDelete: () => void
@@ -85,6 +86,14 @@ export function SandboxCard({
             </p>
             <p className="mt-1 break-all font-bold">
               {sandbox.workspacePath || 'Provisioning...'}
+            </p>
+          </div>
+          <div className="border-2 border-foreground bg-muted p-3 lg:col-span-2">
+            <p className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">
+              Billed usage
+            </p>
+            <p className="mt-1 font-bold">
+              ${((sandbox.billedUsdCents ?? 0) / 100).toFixed(2)}
             </p>
           </div>
         </div>

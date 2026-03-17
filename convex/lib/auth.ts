@@ -31,8 +31,35 @@ export async function getCurrentUserRecord(
     .unique()
 }
 
+export async function getUserRecordByTokenIdentifier(
+  ctx: AuthCtx,
+  tokenIdentifier: string,
+): Promise<Doc<'users'> | null> {
+  return await ctx.db
+    .query('users')
+    .withIndex('by_token_identifier', (q) =>
+      q.eq('tokenIdentifier', tokenIdentifier),
+    )
+    .unique()
+}
+
 export async function requireCurrentUserRecord(ctx: AuthCtx) {
   const user = await getCurrentUserRecord(ctx)
+
+  if (!user) {
+    throw new ConvexError(
+      'Your account is still syncing. Refresh the page and try again.',
+    )
+  }
+
+  return user
+}
+
+export async function requireUserRecordByTokenIdentifier(
+  ctx: AuthCtx,
+  tokenIdentifier: string,
+) {
+  const user = await getUserRecordByTokenIdentifier(ctx, tokenIdentifier)
 
   if (!user) {
     throw new ConvexError(
