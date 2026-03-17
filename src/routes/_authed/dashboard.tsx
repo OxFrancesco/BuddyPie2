@@ -323,7 +323,7 @@ function DashboardRoute() {
                 <p className="mt-3 text-xs text-muted-foreground">
                   Reserve currency is USDC on Base Sepolia. This UI currently
                   records settled testnet funding locally while the shared ledger
-                  and reserve model are prepared for the x402 seller endpoint.
+                  and reserve model are also used by the x402 seller endpoint.
                 </p>
                 <div className="mt-4 flex flex-col gap-2 sm:flex-row">
                   <Input

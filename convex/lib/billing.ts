@@ -202,6 +202,12 @@ function requirePositiveAmount(amountUsdCents: number, label: string) {
   }
 }
 
+function requireNonEmptyText(value: string, label: string) {
+  if (value.trim().length === 0) {
+    throw new ConvexError(`${label} is required.`)
+  }
+}
+
 function requireActiveReserve(reserve: Doc<'agentReserves'>) {
   if (reserve.status !== 'active') {
     throw new ConvexError('This agent reserve is not active.')
@@ -248,6 +254,8 @@ export async function creditFundingTopup(
   },
 ) {
   requirePositiveAmount(args.amountUsdCents, 'Funding amount')
+  requireNonEmptyText(args.paymentReference, 'Payment reference')
+  requireNonEmptyText(args.idempotencyKey, 'Idempotency key')
 
   const existingTransaction = await ctx.db
     .query('fundingTransactions')
@@ -255,6 +263,22 @@ export async function creditFundingTopup(
     .unique()
 
   if (existingTransaction) {
+    if (existingTransaction.userId !== args.userId) {
+      throw new ConvexError(
+        'This idempotency key already belongs to another account.',
+      )
+    }
+
+    if (
+      existingTransaction.grossUsdCents !== args.amountUsdCents ||
+      existingTransaction.paymentReference !== args.paymentReference ||
+      existingTransaction.source !== args.source
+    ) {
+      throw new ConvexError(
+        'This idempotency key was already used with different payment details.',
+      )
+    }
+
     const existingAccount = await ctx.db.get(existingTransaction.accountId)
 
     if (!existingAccount) {
