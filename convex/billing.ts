@@ -228,14 +228,15 @@ const delegatedBudgetRecordValidator = v.object({
   ownerAddress: v.string(),
   delegatorSmartAccount: v.string(),
   delegateAddress: v.string(),
-  settlementContract: v.string(),
+  treasuryAddress: v.optional(v.string()),
+  settlementContract: v.optional(v.string()),
   contractBudgetId: v.string(),
   delegationJson: v.string(),
   delegationHash: v.string(),
   delegationExpiresAt: v.optional(v.number()),
   approvalMode: v.union(v.literal('exact'), v.literal('standing')),
-  approvalTxHash: v.string(),
-  createTxHash: v.string(),
+  approvalTxHash: v.optional(v.string()),
+  createTxHash: v.optional(v.string()),
   lastSettlementAt: v.optional(v.number()),
   lastSettlementTxHash: v.optional(v.string()),
   lastRevokedAt: v.optional(v.number()),
@@ -545,12 +546,13 @@ export const createDelegatedBudget = mutation({
     ownerAddress: v.string(),
     delegatorSmartAccount: v.string(),
     delegateAddress: v.string(),
+    treasuryAddress: v.string(),
     delegationJson: v.string(),
     delegationHash: v.string(),
     delegationExpiresAt: v.optional(v.number()),
     approvalMode: v.union(v.literal('exact'), v.literal('standing')),
-    approvalTxHash: v.string(),
-    createTxHash: v.string(),
+    approvalTxHash: v.optional(v.string()),
+    createTxHash: v.optional(v.string()),
   },
   returns: delegatedBudgetRecordValidator,
   handler: async (ctx, args) => {
@@ -620,6 +622,23 @@ export const currentDelegatedBudget = query({
       .take(25)
 
     return budgets.find((budget) => budget.status === 'active') ?? null
+  },
+})
+
+export const delegatedBudgetById = query({
+  args: {
+    delegatedBudgetId: v.id('delegatedBudgets'),
+  },
+  returns: v.union(delegatedBudgetRecordValidator, v.null()),
+  handler: async (ctx, args) => {
+    const user = await requireCurrentUserRecord(ctx)
+    const budget = await ctx.db.get(args.delegatedBudgetId)
+
+    if (!budget || budget.userId !== user._id) {
+      return null
+    }
+
+    return budget
   },
 })
 
@@ -808,6 +827,7 @@ export const pricingCatalog = query({
       ),
       delegatedBudget: v.object({
         enabled: v.boolean(),
+        chainId: v.number(),
         network: v.union(
           v.literal('base-sepolia'),
           v.literal('base-mainnet'),

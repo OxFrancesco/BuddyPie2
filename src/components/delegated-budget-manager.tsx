@@ -33,7 +33,8 @@ type DelegatedBudgetSummary = {
 type DelegatedBudgetRecord = {
   _id: string
   contractBudgetId: string
-  settlementContract: string
+  delegationJson: string
+  settlementContract?: string
   lastSettlementTxHash?: string
 } | null
 
@@ -118,9 +119,9 @@ export function DelegatedBudgetManager({
         budgetType,
         interval: budgetType === 'periodic' ? interval : null,
         chainId: environment.chainId,
-        settlementContract: environment.delegatedBudget.settlementContract,
         backendDelegateAddress: environment.delegatedBudget.backendDelegateAddress,
         tokenAddress: environment.delegatedBudget.tokenAddress,
+        treasuryAddress: environment.delegatedBudget.treasuryAddress,
       })
 
       await createDelegatedBudget({
@@ -153,7 +154,6 @@ export function DelegatedBudgetManager({
       await refreshDelegatedBudgetState({
         data: {
           delegatedBudgetId: record._id,
-          contractBudgetId: record.contractBudgetId,
           ...(record.lastSettlementTxHash
             ? { lastSettlementTxHash: record.lastSettlementTxHash }
             : {}),
@@ -184,14 +184,12 @@ export function DelegatedBudgetManager({
     try {
       const revokeResult = await revokeDelegatedBudgetWithWallet({
         chainId: environment.chainId,
-        settlementContract: record.settlementContract,
-        contractBudgetId: record.contractBudgetId,
+        delegationJson: record.delegationJson,
       })
 
       await revokeDelegatedBudget({
         data: {
           delegatedBudgetId: record._id,
-          contractBudgetId: record.contractBudgetId,
           revokeTxHash: revokeResult.txHash,
         },
       })
@@ -298,7 +296,7 @@ export function DelegatedBudgetManager({
         <div className="mt-3 space-y-3">
           {!isConfigured ? (
             <p className="text-xs text-muted-foreground">
-              Configure delegated-budget contract, treasury, and backend delegate
+              Configure the delegated-budget treasury and backend delegate
               environment variables before using this rail.
             </p>
           ) : (
@@ -357,8 +355,9 @@ export function DelegatedBudgetManager({
               </div>
 
               <p className="text-xs text-muted-foreground">
-                Setup prompts MetaMask for one USDC approval and one budget-creation
-                transaction, then stores the signed delegation for later agent spends.
+                Setup stores a smart-account delegation with a treasury-bound USDC
+                spend limit so later agent spends can settle without repeated wallet
+                prompts.
               </p>
 
               <Button

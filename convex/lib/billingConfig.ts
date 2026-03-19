@@ -117,6 +117,32 @@ const defaultClerkPlanCreditGrants: Record<string, ClerkPlanCreditGrantConfig> =
   },
 }
 
+const MAX_CONVEX_ENV_NAME_LENGTH = 39
+
+const billingScopedEnvAliases: Partial<
+  Record<string, Partial<Record<BillingEnvironment, string>>>
+> = {
+  DELEGATED_BUDGET_SETTLEMENT_CONTRACT_ADDRESS: {
+    staging: 'DB_SETTLEMENT_ADDR_STG',
+    production: 'DB_SETTLEMENT_ADDR_PROD',
+  },
+  DELEGATED_BUDGET_TREASURY_ADDRESS: {
+    staging: 'DB_TREASURY_ADDR_STG',
+    production: 'DB_TREASURY_ADDR_PROD',
+  },
+  DELEGATED_BUDGET_BACKEND_DELEGATE_ADDRESS: {
+    staging: 'DB_BACKEND_DELEGATE_STG',
+    production: 'DB_BACKEND_DELEGATE_PROD',
+  },
+  DELEGATED_BUDGET_RPC_URL: {
+    staging: 'DB_RPC_URL_STG',
+    production: 'DB_RPC_URL_PROD',
+  },
+  DELEGATED_BUDGET_BACKEND_PRIVATE_KEY: {
+    staging: 'DB_BACKEND_PK_STG',
+  },
+}
+
 function parsePositiveWholeNumber(value: unknown) {
   if (typeof value !== 'number' || !Number.isInteger(value) || value < 0) {
     return null
@@ -165,6 +191,14 @@ function parsePlanCreditGrantConfig(rawValue: string | undefined) {
   }
 }
 
+function readEnvironmentValue(name: string | undefined) {
+  if (!name || name.length > MAX_CONVEX_ENV_NAME_LENGTH) {
+    return ''
+  }
+
+  return process.env[name]?.trim() || ''
+}
+
 export function resolveBillingEnvironment(): BillingEnvironment {
   const candidate = process.env.BILLING_ENVIRONMENT?.trim().toLowerCase()
 
@@ -175,12 +209,19 @@ export function resolveBillingEnvironment(): BillingEnvironment {
   return 'staging'
 }
 
-function readEnvironmentScopedValue(baseName: string) {
+export function readBillingEnvironmentScopedValue(baseName: string) {
   const environment = resolveBillingEnvironment()
   const scopedName =
-    environment === 'production' ? `${baseName}_PRODUCTION` : `${baseName}_STAGING`
+    environment === 'production'
+      ? `${baseName}_PRODUCTION`
+      : `${baseName}_STAGING`
+  const aliasName = billingScopedEnvAliases[baseName]?.[environment]
 
-  return process.env[scopedName]?.trim() || process.env[baseName]?.trim() || ''
+  return (
+    readEnvironmentValue(aliasName) ||
+    readEnvironmentValue(scopedName) ||
+    readEnvironmentValue(baseName)
+  )
 }
 
 export function getBillingEnvironmentConfig() {
@@ -213,19 +254,18 @@ export function getBillingEnvironmentConfig() {
 
 export function getDelegatedBudgetEnvironmentConfig() {
   const billing = getBillingEnvironmentConfig()
-  const settlementContract = readEnvironmentScopedValue(
+  const settlementContract = readBillingEnvironmentScopedValue(
     'DELEGATED_BUDGET_SETTLEMENT_CONTRACT_ADDRESS',
   )
-  const treasuryAddress = readEnvironmentScopedValue(
+  const treasuryAddress = readBillingEnvironmentScopedValue(
     'DELEGATED_BUDGET_TREASURY_ADDRESS',
   )
-  const backendDelegateAddress = readEnvironmentScopedValue(
+  const backendDelegateAddress = readBillingEnvironmentScopedValue(
     'DELEGATED_BUDGET_BACKEND_DELEGATE_ADDRESS',
   )
 
   return {
     enabled:
-      settlementContract.length > 0 &&
       treasuryAddress.length > 0 &&
       backendDelegateAddress.length > 0,
     chainId: billing.chainId,

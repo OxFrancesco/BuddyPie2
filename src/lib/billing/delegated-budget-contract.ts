@@ -15,6 +15,10 @@ export const erc20ApprovalAbi = parseAbi([
   'function allowance(address owner, address spender) view returns (uint256)',
 ])
 
+export const erc20TransferAbi = parseAbi([
+  'function transfer(address to, uint256 amount) returns (bool)',
+])
+
 export type DelegatedBudgetType = 'fixed' | 'periodic'
 export type DelegatedBudgetInterval = 'day' | 'week' | 'month'
 
@@ -41,6 +45,19 @@ export function usdCentsToUsdcAtomic(amountUsdCents: number) {
   return BigInt(amountUsdCents) * USDC_ATOMIC_UNITS_PER_USD_CENT
 }
 
+export function delegatedBudgetIntervalToDurationSeconds(
+  interval: DelegatedBudgetInterval,
+) {
+  switch (interval) {
+    case 'day':
+      return 24 * 60 * 60
+    case 'week':
+      return 7 * 24 * 60 * 60
+    case 'month':
+      return 30 * 24 * 60 * 60
+  }
+}
+
 export function getDelegatedBudgetApprovalAmount(args: {
   amountUsdCents: number
   budgetType: DelegatedBudgetType
@@ -54,4 +71,13 @@ export function getDelegatedBudgetApprovalAmount(args: {
 
 export function buildDelegatedBudgetId(seed: string) {
   return keccak256(stringToHex(seed))
+}
+
+export function advanceDelegatedBudgetPeriodEndMs(
+  periodStartAt: number,
+  interval: DelegatedBudgetInterval,
+) {
+  return (
+    periodStartAt + delegatedBudgetIntervalToDurationSeconds(interval) * 1000
+  )
 }

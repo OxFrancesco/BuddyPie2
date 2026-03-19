@@ -97,23 +97,22 @@ type CreateDelegatedBudgetInput = {
   ownerAddress: string
   delegatorSmartAccount: string
   delegateAddress: string
+  treasuryAddress: string
   delegationJson: string
   delegationHash: string
   delegationExpiresAt?: number | null
   approvalMode: 'exact' | 'standing'
-  approvalTxHash: string
-  createTxHash: string
+  approvalTxHash?: string
+  createTxHash?: string
 }
 
 type SyncDelegatedBudgetInput = {
   delegatedBudgetId: string
-  contractBudgetId: string
   lastSettlementTxHash?: string
 }
 
 type RevokeDelegatedBudgetInput = {
   delegatedBudgetId: string
-  contractBudgetId: string
   revokeTxHash: string
 }
 
@@ -134,14 +133,15 @@ export const createDelegatedBudget = createServerFn({ method: 'POST' })
       ownerAddress: data.ownerAddress,
       delegatorSmartAccount: data.delegatorSmartAccount,
       delegateAddress: data.delegateAddress,
+      treasuryAddress: data.treasuryAddress,
       delegationJson: data.delegationJson,
       delegationHash: data.delegationHash,
       ...(data.delegationExpiresAt
         ? { delegationExpiresAt: data.delegationExpiresAt }
         : {}),
       approvalMode: data.approvalMode,
-      approvalTxHash: data.approvalTxHash,
-      createTxHash: data.createTxHash,
+      ...(data.approvalTxHash ? { approvalTxHash: data.approvalTxHash } : {}),
+      ...(data.createTxHash ? { createTxHash: data.createTxHash } : {}),
     })
   })
 
@@ -152,7 +152,15 @@ export const refreshDelegatedBudgetState = createServerFn({ method: 'POST' })
     const { readDelegatedBudgetOnchain } = await import(
       '~/lib/server/delegated-budget'
     )
-    const onchainBudget = await readDelegatedBudgetOnchain(data.contractBudgetId)
+    const budget = await convex.query(api.billing.delegatedBudgetById, {
+      delegatedBudgetId: data.delegatedBudgetId as Id<'delegatedBudgets'>,
+    })
+
+    if (!budget) {
+      throw new Error('Delegated budget not found.')
+    }
+
+    const onchainBudget = await readDelegatedBudgetOnchain(budget)
 
     return await convex.mutation(api.billing.refreshDelegatedBudgetState, {
       delegatedBudgetId: data.delegatedBudgetId as Id<'delegatedBudgets'>,
@@ -183,7 +191,15 @@ export const revokeDelegatedBudget = createServerFn({ method: 'POST' })
     const { readDelegatedBudgetOnchain } = await import(
       '~/lib/server/delegated-budget'
     )
-    const onchainBudget = await readDelegatedBudgetOnchain(data.contractBudgetId)
+    const budget = await convex.query(api.billing.delegatedBudgetById, {
+      delegatedBudgetId: data.delegatedBudgetId as Id<'delegatedBudgets'>,
+    })
+
+    if (!budget) {
+      throw new Error('Delegated budget not found.')
+    }
+
+    const onchainBudget = await readDelegatedBudgetOnchain(budget)
 
     return await convex.mutation(api.billing.revokeDelegatedBudget, {
       delegatedBudgetId: data.delegatedBudgetId as Id<'delegatedBudgets'>,

@@ -1,5 +1,6 @@
+import { randomUUID } from 'node:crypto'
 import { api } from 'convex/_generated/api'
-import type { Id } from 'convex/_generated/dataModel'
+import type { Doc, Id } from 'convex/_generated/dataModel'
 import {
   getBillingEventPriceUsdCents,
   type BillingPaymentMethod,
@@ -11,6 +12,10 @@ import {
 } from '~/lib/opencode/presets'
 import { normalizeSandboxInput } from '~/lib/sandboxes'
 import { getAuthenticatedConvexClient } from '~/lib/server/authenticated-convex'
+import {
+  assertDelegatedBudgetAllowanceOrThrow,
+  settleDelegatedBudgetOnchain,
+} from '~/lib/server/delegated-budget'
 
 type GithubApiRepo = {
   id: number
@@ -38,6 +43,28 @@ function getErrorMessage(error: unknown) {
   }
 
   return 'Something went wrong while talking to Daytona.'
+}
+
+async function requireDelegatedBudgetAllowance(args: {
+  requiredAmountUsdCents: number
+  actionLabel: string
+}): Promise<Doc<'delegatedBudgets'>> {
+  const { convex } = await getAuthenticatedConvexClient()
+  const delegatedBudget = await convex.query(api.billing.currentDelegatedBudget, {})
+
+  if (!delegatedBudget) {
+    throw new Error(
+      'Set up an active delegated budget before using that payment rail.',
+    )
+  }
+
+  await assertDelegatedBudgetAllowanceOrThrow({
+    budget: delegatedBudget,
+    requiredAmountUsdCents: args.requiredAmountUsdCents,
+    actionLabel: args.actionLabel,
+  })
+
+  return delegatedBudget
 }
 
 async function getGithubAccessToken(userId: string) {
@@ -133,18 +160,24 @@ async function withPaidSandboxAction<T>(args: {
   releaseReason?: string
 }) {
   const { convex } = await getAuthenticatedConvexClient()
+  const amountUsdCents = getBillingEventPriceUsdCents(
+    args.agentPresetId,
+    args.eventType,
+  )
 
   if (args.paymentMethod === 'x402') {
     return await args.action()
   }
 
   if (args.paymentMethod === 'delegated_budget') {
-    const delegatedBudget = await convex.query(api.billing.currentDelegatedBudget, {})
-
-    if (!delegatedBudget) {
-      throw new Error(
-        'Set up an active delegated budget before using that payment rail.',
-      )
+    let delegatedBudget: Awaited<
+      ReturnType<typeof requireDelegatedBudgetAllowance>
+    > | null = null
+    if (!args.shouldCapture) {
+      delegatedBudget = await requireDelegatedBudgetAllowance({
+        requiredAmountUsdCents: amountUsdCents,
+        actionLabel: args.description,
+      })
     }
 
     const result = await args.action()
@@ -153,17 +186,15 @@ async function withPaidSandboxAction<T>(args: {
       return result
     }
 
-    const idempotencyKey = `${args.eventType}:${args.sandboxId}:${Date.now()}`
-    const { settleDelegatedBudgetOnchain } = await import(
-      '~/lib/server/delegated-budget'
-    )
+    delegatedBudget ??= await requireDelegatedBudgetAllowance({
+      requiredAmountUsdCents: amountUsdCents,
+      actionLabel: args.description,
+    })
+
+    const idempotencyKey = `${args.eventType}:${args.sandboxId}:${randomUUID()}`
     const settlement = await settleDelegatedBudgetOnchain({
-      contractBudgetId: delegatedBudget.contractBudgetId,
-      delegationJson: delegatedBudget.delegationJson,
-      amountUsdCents: getBillingEventPriceUsdCents(
-        args.agentPresetId,
-        args.eventType,
-      ),
+      budget: delegatedBudget,
+      amountUsdCents,
       idempotencyKey,
     })
 
@@ -172,10 +203,7 @@ async function withPaidSandboxAction<T>(args: {
       sandboxId: args.sandboxId,
       agentPresetId: args.agentPresetId,
       eventType: args.eventType,
-      amountUsdCents: getBillingEventPriceUsdCents(
-        args.agentPresetId,
-        args.eventType,
-      ),
+      amountUsdCents,
       idempotencyKey,
       description: args.description,
       quantitySummary: args.quantitySummary,
@@ -260,26 +288,18 @@ async function captureDelegatedLaunchCharge(args: {
   repoName: string
   repoBranch?: string
 }) {
-  const { convex } = await getAuthenticatedConvexClient()
-  const delegatedBudget = await convex.query(api.billing.currentDelegatedBudget, {})
-
-  if (!delegatedBudget) {
-    throw new Error(
-      'Set up an active delegated budget before using that payment rail.',
-    )
-  }
-
   const amountUsdCents = getBillingEventPriceUsdCents(
     args.agentPresetId,
     'sandbox_launch',
   )
-  const idempotencyKey = `sandbox_launch:${args.sandboxId}:${Date.now()}`
-  const { settleDelegatedBudgetOnchain } = await import(
-    '~/lib/server/delegated-budget'
-  )
+  const delegatedBudget = await requireDelegatedBudgetAllowance({
+    requiredAmountUsdCents: amountUsdCents,
+    actionLabel: `launching OpenCode for ${args.repoName}`,
+  })
+  const { convex } = await getAuthenticatedConvexClient()
+  const idempotencyKey = `sandbox_launch:${args.sandboxId}:${randomUUID()}`
   const settlement = await settleDelegatedBudgetOnchain({
-    contractBudgetId: delegatedBudget.contractBudgetId,
-    delegationJson: delegatedBudget.delegationJson,
+    budget: delegatedBudget,
     amountUsdCents,
     idempotencyKey,
   })
@@ -346,6 +366,16 @@ async function launchSandboxLifecycle(args: {
   let launched: LaunchedSandbox | null = null
 
   try {
+    if (args.paymentMethod === 'delegated_budget') {
+      await requireDelegatedBudgetAllowance({
+        requiredAmountUsdCents: getBillingEventPriceUsdCents(
+          args.normalized.agentPresetId,
+          'sandbox_launch',
+        ),
+        actionLabel: `launching ${args.normalized.repoName}`,
+      })
+    }
+
     const githubToken =
       args.normalized.repoProvider === 'github'
         ? await getGithubAccessToken(userId)
@@ -435,6 +465,16 @@ async function restartSandboxLifecycle(args: {
   let launched: LaunchedSandbox | null = null
 
   try {
+    if (args.paymentMethod === 'delegated_budget') {
+      await requireDelegatedBudgetAllowance({
+        requiredAmountUsdCents: getBillingEventPriceUsdCents(
+          restartPreset.agentPresetId,
+          'sandbox_launch',
+        ),
+        actionLabel: `restarting ${sandbox.repoName}`,
+      })
+    }
+
     const githubToken =
       sandbox.repoProvider === 'github'
         ? await getGithubAccessToken(userId)

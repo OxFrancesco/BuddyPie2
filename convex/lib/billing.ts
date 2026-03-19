@@ -67,6 +67,10 @@ function requireNonEmptyText(value: string, label: string) {
   }
 }
 
+function normalizeAddress(value: string) {
+  return value.trim().toLowerCase()
+}
+
 function buildInsufficientWalletMessage(requiredUsdCents: number) {
   return `Your shared credit wallet needs at least ${formatUsdCents(requiredUsdCents)} available before this action can continue.`
 }
@@ -846,18 +850,27 @@ export async function createDelegatedBudget(
     ownerAddress: string
     delegatorSmartAccount: string
     delegateAddress: string
+    treasuryAddress: string
     delegationJson: string
     delegationHash: string
     delegationExpiresAt?: number
     approvalMode: 'exact' | 'standing'
-    approvalTxHash: string
-    createTxHash: string
+    approvalTxHash?: string
+    createTxHash?: string
   },
 ) {
   requirePositiveWholeCents(
     args.configuredAmountUsdCents,
     'Delegated budget amount',
   )
+  if (
+    !Number.isInteger(args.remainingAmountUsdCents) ||
+    args.remainingAmountUsdCents !== args.configuredAmountUsdCents
+  ) {
+    throw new ConvexError(
+      'New delegated budgets must start with their full configured allowance remaining.',
+    )
+  }
   requireNonEmptyText(args.contractBudgetId, 'Delegated budget ID')
   requireNonEmptyText(args.ownerAddress, 'Budget owner address')
   requireNonEmptyText(
@@ -865,10 +878,9 @@ export async function createDelegatedBudget(
     'Delegator smart account address',
   )
   requireNonEmptyText(args.delegateAddress, 'Backend delegate address')
+  requireNonEmptyText(args.treasuryAddress, 'Delegated-budget treasury address')
   requireNonEmptyText(args.delegationJson, 'Delegation payload')
   requireNonEmptyText(args.delegationHash, 'Delegation hash')
-  requireNonEmptyText(args.approvalTxHash, 'Approval transaction hash')
-  requireNonEmptyText(args.createTxHash, 'Budget creation transaction hash')
 
   const existingBudget = await ctx.db
     .query('delegatedBudgets')
@@ -898,7 +910,35 @@ export async function createDelegatedBudget(
     )
   }
 
+  if (
+    normalizeAddress(args.delegateAddress) !==
+    normalizeAddress(delegatedBudgetConfig.backendDelegateAddress)
+  ) {
+    throw new ConvexError(
+      'The delegated budget was signed for a different backend delegate.',
+    )
+  }
+
+  if (
+    normalizeAddress(args.treasuryAddress) !==
+    normalizeAddress(delegatedBudgetConfig.treasuryAddress)
+  ) {
+    throw new ConvexError(
+      'The delegated budget treasury does not match the configured BuddyPie treasury.',
+    )
+  }
+
   const now = Date.now()
+
+  if (
+    typeof args.delegationExpiresAt === 'number' &&
+    args.delegationExpiresAt <= now
+  ) {
+    throw new ConvexError(
+      'The signed delegated budget has already expired. Create a fresh budget.',
+    )
+  }
+
   const budgetId = await ctx.db.insert('delegatedBudgets', {
     userId: args.userId,
     ...(account ? { accountId: account._id } : {}),
@@ -914,7 +954,10 @@ export async function createDelegatedBudget(
     ownerAddress: args.ownerAddress,
     delegatorSmartAccount: args.delegatorSmartAccount,
     delegateAddress: args.delegateAddress,
-    settlementContract: delegatedBudgetConfig.settlementContract,
+    treasuryAddress: args.treasuryAddress,
+    ...(delegatedBudgetConfig.settlementContract
+      ? { settlementContract: delegatedBudgetConfig.settlementContract }
+      : {}),
     contractBudgetId: args.contractBudgetId,
     delegationJson: args.delegationJson,
     delegationHash: args.delegationHash,
@@ -922,8 +965,8 @@ export async function createDelegatedBudget(
       ? { delegationExpiresAt: args.delegationExpiresAt }
       : {}),
     approvalMode: args.approvalMode,
-    approvalTxHash: args.approvalTxHash,
-    createTxHash: args.createTxHash,
+    ...(args.approvalTxHash ? { approvalTxHash: args.approvalTxHash } : {}),
+    ...(args.createTxHash ? { createTxHash: args.createTxHash } : {}),
     createdAt: now,
     updatedAt: now,
   })
