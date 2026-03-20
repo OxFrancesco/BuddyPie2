@@ -39,6 +39,12 @@ Current preset defaults:
 The selected workflow preset controls instructions, skills, workspace
 bootstrap, and kickoff behavior.
 
+Kickoff default behavior:
+
+- leaving the dashboard kickoff field blank uses the preset starter prompt
+- every current preset, including `general-engineer`, is expected to keep a
+  non-empty starter prompt so BuddyPie can seed the first OpenCode session
+
 The selected provider/model controls which OpenCode provider and model are
 used at runtime.
 

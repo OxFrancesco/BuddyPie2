@@ -350,19 +350,7 @@ async function launchSandboxLifecycle(args: {
 }) {
   const { convex, userId } = await getAuthenticatedConvexClient()
   await convex.mutation(api.user.ensureCurrentUser, {})
-
-  const pendingSandbox = await convex.mutation(api.sandboxes.createPending, {
-    repoUrl: args.normalized.repoUrl,
-    repoName: args.normalized.repoName,
-    repoBranch: args.normalized.branch,
-    repoProvider: args.normalized.repoProvider,
-    agentPresetId: args.normalized.agentPresetId,
-    agentLabel: args.normalized.agentLabel,
-    agentProvider: args.normalized.agentProvider,
-    agentModel: args.normalized.agentModel,
-    initialPrompt: args.normalized.initialPrompt,
-    paymentMethod: args.paymentMethod,
-  })
+  let pendingSandbox: Doc<'sandboxes'> | null = null
   let launched: LaunchedSandbox | null = null
 
   try {
@@ -380,7 +368,27 @@ async function launchSandboxLifecycle(args: {
       args.normalized.repoProvider === 'github'
         ? await getGithubAccessToken(userId)
         : null
-    const { createOpenCodeSandbox } = await import('~/lib/server/daytona')
+    const { createOpenCodeSandbox, resolveOpenCodeLaunchConfig } = await import(
+      '~/lib/server/daytona'
+    )
+    resolveOpenCodeLaunchConfig({
+      agentPresetId: args.normalized.agentPresetId,
+      agentProvider: args.normalized.agentProvider,
+      agentModel: args.normalized.agentModel,
+      githubToken,
+    })
+    pendingSandbox = await convex.mutation(api.sandboxes.createPending, {
+      repoUrl: args.normalized.repoUrl,
+      repoName: args.normalized.repoName,
+      repoBranch: args.normalized.branch,
+      repoProvider: args.normalized.repoProvider,
+      agentPresetId: args.normalized.agentPresetId,
+      agentLabel: args.normalized.agentLabel,
+      agentProvider: args.normalized.agentProvider,
+      agentModel: args.normalized.agentModel,
+      initialPrompt: args.normalized.initialPrompt,
+      paymentMethod: args.paymentMethod,
+    })
     launched = await createOpenCodeSandbox({
       repoUrl: args.normalized.repoUrl,
       branch: args.normalized.branch,
@@ -427,10 +435,12 @@ async function launchSandboxLifecycle(args: {
       }
     }
 
-    await convex.mutation(api.sandboxes.markFailed, {
-      sandboxId: pendingSandbox._id,
-      errorMessage: message,
-    })
+    if (pendingSandbox) {
+      await convex.mutation(api.sandboxes.markFailed, {
+        sandboxId: pendingSandbox._id,
+        errorMessage: message,
+      })
+    }
 
     throw new Error(message)
   }
@@ -450,18 +460,7 @@ async function restartSandboxLifecycle(args: {
   }
 
   const restartPreset = resolveSandboxPreset(sandbox)
-  const pendingSandbox = await convex.mutation(api.sandboxes.createPending, {
-    repoUrl: sandbox.repoUrl,
-    repoName: sandbox.repoName,
-    repoBranch: sandbox.repoBranch,
-    repoProvider: sandbox.repoProvider,
-    agentPresetId: restartPreset.agentPresetId,
-    agentLabel: restartPreset.agentLabel,
-    agentProvider: restartPreset.agentProvider,
-    agentModel: restartPreset.agentModel,
-    initialPrompt: restartPreset.initialPrompt,
-    paymentMethod: args.paymentMethod,
-  })
+  let pendingSandbox: Doc<'sandboxes'> | null = null
   let launched: LaunchedSandbox | null = null
 
   try {
@@ -479,8 +478,29 @@ async function restartSandboxLifecycle(args: {
       sandbox.repoProvider === 'github'
         ? await getGithubAccessToken(userId)
         : null
-    const { createOpenCodeSandbox, deleteOpenCodeSandbox } =
-      await import('~/lib/server/daytona')
+    const {
+      createOpenCodeSandbox,
+      deleteOpenCodeSandbox,
+      resolveOpenCodeLaunchConfig,
+    } = await import('~/lib/server/daytona')
+    resolveOpenCodeLaunchConfig({
+      agentPresetId: restartPreset.agentPresetId,
+      agentProvider: restartPreset.agentProvider,
+      agentModel: restartPreset.agentModel,
+      githubToken,
+    })
+    pendingSandbox = await convex.mutation(api.sandboxes.createPending, {
+      repoUrl: sandbox.repoUrl,
+      repoName: sandbox.repoName,
+      repoBranch: sandbox.repoBranch,
+      repoProvider: sandbox.repoProvider,
+      agentPresetId: restartPreset.agentPresetId,
+      agentLabel: restartPreset.agentLabel,
+      agentProvider: restartPreset.agentProvider,
+      agentModel: restartPreset.agentModel,
+      initialPrompt: restartPreset.initialPrompt,
+      paymentMethod: args.paymentMethod,
+    })
     launched = await createOpenCodeSandbox({
       repoUrl: sandbox.repoUrl,
       branch: sandbox.repoBranch,
@@ -538,10 +558,12 @@ async function restartSandboxLifecycle(args: {
       }
     }
 
-    await convex.mutation(api.sandboxes.markFailed, {
-      sandboxId: pendingSandbox._id,
-      errorMessage: message,
-    })
+    if (pendingSandbox) {
+      await convex.mutation(api.sandboxes.markFailed, {
+        sandboxId: pendingSandbox._id,
+        errorMessage: message,
+      })
+    }
 
     throw new Error(message)
   }

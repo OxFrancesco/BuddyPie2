@@ -74,6 +74,11 @@ When a sandbox launches, BuddyPie writes the preset-specific OpenCode files
 inside the sandbox, starts `opencode web`, then seeds the first session with
 the selected kickoff task.
 
+Leaving the kickoff field blank uses the preset's built-in starter prompt.
+Every current preset, including `general-engineer`, now ships a non-empty
+starter prompt, and BuddyPie opens the seeded OpenCode session directly in
+the web UI instead of landing on the generic root view.
+
 The `docs-writer` preset also performs a docs-specific workspace bootstrap
 before OpenCode starts:
 

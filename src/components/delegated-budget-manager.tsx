@@ -1,13 +1,15 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Alert, AlertDescription } from '~/components/ui/alert'
 import { Button } from '~/components/ui/button'
 import { Input } from '~/components/ui/input'
 import {
   createDelegatedBudget,
+  type DelegatedBudgetHealthResult,
   refreshDelegatedBudgetState,
   revokeDelegatedBudget,
 } from '~/features/billing/server'
 import {
+  type DelegatedBudgetFlowStep,
   createDelegatedBudgetWithWallet,
   revokeDelegatedBudgetWithWallet,
 } from '~/lib/billing/delegated-budget-client'
@@ -48,6 +50,7 @@ type DelegatedBudgetEnvironment = {
     settlementContract: string
     treasuryAddress: string
     backendDelegateAddress: string
+    bundlerUrl: string
   }
 }
 
@@ -55,11 +58,36 @@ type DelegatedBudgetManagerProps = {
   id?: string
   summary?: DelegatedBudgetSummary | null
   record?: DelegatedBudgetRecord
+  health?: DelegatedBudgetHealthResult | null
   environment: DelegatedBudgetEnvironment
   onUpdated: () => Promise<void>
   onSelectRail?: () => void
   className?: string
   compact?: boolean
+}
+
+function getDelegatedBudgetConfigurationError(
+  environment: DelegatedBudgetEnvironment,
+) {
+  const missingLabels: string[] = []
+
+  if (!environment.delegatedBudget.treasuryAddress.trim()) {
+    missingLabels.push('treasury address')
+  }
+
+  if (!environment.delegatedBudget.backendDelegateAddress.trim()) {
+    missingLabels.push('backend delegate address')
+  }
+
+  if (!environment.delegatedBudget.bundlerUrl.trim()) {
+    missingLabels.push('bundler URL')
+  }
+
+  if (missingLabels.length === 0) {
+    return 'Delegated budgets are not configured in this environment yet.'
+  }
+
+  return `Delegated budgets are not configured in this environment yet. Missing ${missingLabels.join(', ')}.`
 }
 
 function formatDateTime(value?: string | number | null) {
@@ -76,10 +104,36 @@ function formatDateTime(value?: string | number | null) {
   return parsedDate.toLocaleString()
 }
 
+const stepLabels: Record<DelegatedBudgetFlowStep, string> = {
+  connect_wallet: 'Connect wallet',
+  confirm_network: 'Confirm Base network',
+  derive_smart_account: 'Derive smart account',
+  deploy_smart_account: 'Deploy smart account',
+  sign_budget_delegation: 'Sign budget delegation',
+  reset_stale_budget: 'Reset stale budget',
+}
+
+const createFlowSteps: DelegatedBudgetFlowStep[] = [
+  'confirm_network',
+  'connect_wallet',
+  'derive_smart_account',
+  'deploy_smart_account',
+  'sign_budget_delegation',
+]
+
+const resetFlowSteps: DelegatedBudgetFlowStep[] = [
+  'confirm_network',
+  'connect_wallet',
+  'derive_smart_account',
+  'deploy_smart_account',
+  'reset_stale_budget',
+]
+
 export function DelegatedBudgetManager({
   id,
   summary,
   record,
+  health,
   environment,
   onUpdated,
   onSelectRail,
@@ -92,11 +146,53 @@ export function DelegatedBudgetManager({
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState<string | null>(null)
   const [isSubmitting, setIsSubmitting] = useState(false)
+  const [currentStep, setCurrentStep] = useState<DelegatedBudgetFlowStep | null>(
+    null,
+  )
+  const [currentFlow, setCurrentFlow] = useState<'create' | 'reset' | 'revoke' | null>(
+    null,
+  )
 
   const isConfigured = environment.delegatedBudget.enabled
+  const delegatedBudgetConfigurationError =
+    getDelegatedBudgetConfigurationError(environment)
   const hasActiveBudget = summary?.status === 'active' && record
+  const hasUsableBudget = Boolean(
+    hasActiveBudget && health?.health === 'usable',
+  )
+  const needsReset = Boolean(hasActiveBudget && health?.health === 'needs_recreate')
+  const visibleSteps =
+    currentFlow === 'create'
+      ? createFlowSteps
+      : currentFlow === 'reset' || currentFlow === 'revoke'
+        ? resetFlowSteps
+        : []
 
-  async function handleCreateBudget() {
+  useEffect(() => {
+    if (
+      hasActiveBudget &&
+      summary?.configuredAmountUsdCents &&
+      amount === '25'
+    ) {
+      setAmount(String(summary.configuredAmountUsdCents / 100))
+    }
+
+    if (hasActiveBudget && summary?.type) {
+      setBudgetType(summary.type)
+    }
+
+    if (summary?.interval) {
+      setInterval(summary.interval)
+    }
+  }, [
+    amount,
+    hasActiveBudget,
+    summary?.configuredAmountUsdCents,
+    summary?.interval,
+    summary?.type,
+  ])
+
+  async function createFreshBudget() {
     const parsedAmount = Number(amount)
 
     if (!Number.isFinite(parsedAmount) || parsedAmount <= 0) {
@@ -105,13 +201,15 @@ export function DelegatedBudgetManager({
     }
 
     if (!isConfigured) {
-      setError('Delegated budgets are not configured in this environment yet.')
+      setError(delegatedBudgetConfigurationError)
       return
     }
 
     setIsSubmitting(true)
     setError(null)
     setSuccess(null)
+    setCurrentFlow('create')
+    setCurrentStep('confirm_network')
 
     try {
       const setup = await createDelegatedBudgetWithWallet({
@@ -122,6 +220,7 @@ export function DelegatedBudgetManager({
         backendDelegateAddress: environment.delegatedBudget.backendDelegateAddress,
         tokenAddress: environment.delegatedBudget.tokenAddress,
         treasuryAddress: environment.delegatedBudget.treasuryAddress,
+        onProgress: setCurrentStep,
       })
 
       await createDelegatedBudget({
@@ -137,6 +236,8 @@ export function DelegatedBudgetManager({
           : 'Could not create the delegated budget.',
       )
     } finally {
+      setCurrentFlow(null)
+      setCurrentStep(null)
       setIsSubmitting(false)
     }
   }
@@ -172,29 +273,106 @@ export function DelegatedBudgetManager({
     }
   }
 
-  async function handleRevokeBudget() {
+  async function handleCreateBudget() {
+    await createFreshBudget()
+  }
+
+  async function handleResetAndRecreateBudget() {
     if (!record) {
+      return
+    }
+
+    if (!isConfigured) {
+      setError(delegatedBudgetConfigurationError)
       return
     }
 
     setIsSubmitting(true)
     setError(null)
     setSuccess(null)
+    setCurrentFlow('reset')
+    setCurrentStep('confirm_network')
 
     try {
       const revokeResult = await revokeDelegatedBudgetWithWallet({
         chainId: environment.chainId,
+        bundlerUrl: environment.delegatedBudget.bundlerUrl,
         delegationJson: record.delegationJson,
+        onProgress: setCurrentStep,
       })
 
       await revokeDelegatedBudget({
         data: {
           delegatedBudgetId: record._id,
-          revokeTxHash: revokeResult.txHash,
+          ...(revokeResult.revocationMode === 'onchain'
+            ? { revokeTxHash: revokeResult.txHash }
+            : {}),
+          revocationMode: revokeResult.revocationMode,
         },
       })
       await onUpdated()
-      setSuccess('Delegated budget revoked.')
+      setCurrentFlow(null)
+      setCurrentStep(null)
+      setIsSubmitting(false)
+
+      await createFreshBudget()
+
+      setSuccess(
+        revokeResult.revocationMode === 'local_retire'
+          ? 'Stale delegated budget was retired locally and replaced with a fresh one.'
+          : 'Stale delegated budget replaced with a fresh one.',
+      )
+    } catch (resetError) {
+      setError(
+        resetError instanceof Error
+          ? resetError.message
+          : 'Could not reset the delegated budget.',
+      )
+      setCurrentFlow(null)
+      setCurrentStep(null)
+      setIsSubmitting(false)
+    }
+  }
+
+  async function handleRevokeBudget() {
+    if (!record) {
+      return
+    }
+
+    if (!isConfigured) {
+      setError(delegatedBudgetConfigurationError)
+      return
+    }
+
+    setIsSubmitting(true)
+    setError(null)
+    setSuccess(null)
+    setCurrentFlow('revoke')
+    setCurrentStep('confirm_network')
+
+    try {
+      const revokeResult = await revokeDelegatedBudgetWithWallet({
+        chainId: environment.chainId,
+        bundlerUrl: environment.delegatedBudget.bundlerUrl,
+        delegationJson: record.delegationJson,
+        onProgress: setCurrentStep,
+      })
+
+      await revokeDelegatedBudget({
+        data: {
+          delegatedBudgetId: record._id,
+          ...(revokeResult.revocationMode === 'onchain'
+            ? { revokeTxHash: revokeResult.txHash }
+            : {}),
+          revocationMode: revokeResult.revocationMode,
+        },
+      })
+      await onUpdated()
+      setSuccess(
+        revokeResult.revocationMode === 'onchain'
+          ? 'Delegated budget revoked.'
+          : revokeResult.warning,
+      )
     } catch (revokeError) {
       setError(
         revokeError instanceof Error
@@ -202,6 +380,8 @@ export function DelegatedBudgetManager({
           : 'Could not revoke the delegated budget.',
       )
     } finally {
+      setCurrentFlow(null)
+      setCurrentStep(null)
       setIsSubmitting(false)
     }
   }
@@ -220,7 +400,13 @@ export function DelegatedBudgetManager({
             Delegated budget
           </p>
           <p className="mt-1 text-sm font-black uppercase">
-            {hasActiveBudget ? 'Active' : isConfigured ? 'Setup required' : 'Unavailable'}
+            {hasUsableBudget
+              ? 'Active'
+              : needsReset
+                ? 'Needs reset'
+                : isConfigured
+                  ? 'Setup required'
+                  : 'Unavailable'}
           </p>
         </div>
         <div className="flex gap-2">
@@ -229,11 +415,12 @@ export function DelegatedBudgetManager({
             variant="outline"
             size="sm"
             onClick={() => onSelectRail?.()}
-            className="border-2 border-foreground text-xs font-bold uppercase shadow-[2px_2px_0_var(--foreground)] hover:translate-x-[1px] hover:translate-y-[1px] hover:shadow-none"
+            disabled={!hasUsableBudget}
+            className="border-2 border-foreground text-xs font-bold uppercase shadow-[2px_2px_0_var(--foreground)] hover:translate-x-[1px] hover:translate-y-[1px] hover:shadow-none disabled:translate-x-0 disabled:translate-y-0 disabled:cursor-not-allowed disabled:opacity-60 disabled:shadow-[2px_2px_0_var(--foreground)]"
           >
             Use rail
           </Button>
-          {hasActiveBudget ? (
+          {hasUsableBudget ? (
             <Button
               type="button"
               variant="outline"
@@ -260,6 +447,46 @@ export function DelegatedBudgetManager({
         </Alert>
       ) : null}
 
+      {visibleSteps.length > 0 ? (
+        <div className="mt-3 border-2 border-foreground bg-muted/40 p-3">
+          <p className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">
+            {currentFlow === 'create'
+              ? 'Setup progress'
+              : currentFlow === 'reset'
+                ? 'Reset progress'
+                : 'Revoke progress'}
+          </p>
+          <div className="mt-2 grid gap-2">
+            {visibleSteps.map((step) => {
+              const active = currentStep === step
+              const completed =
+                currentStep !== null &&
+                visibleSteps.indexOf(step) < visibleSteps.indexOf(currentStep)
+
+              return (
+                <div key={step} className="flex items-center gap-2 text-xs">
+                  <span
+                    className={cn(
+                      'inline-block h-2.5 w-2.5 rounded-full border border-foreground',
+                      completed || active ? 'bg-foreground' : 'bg-background',
+                    )}
+                  />
+                  <span
+                    className={cn(
+                      completed || active
+                        ? 'font-bold text-foreground'
+                        : 'text-muted-foreground',
+                    )}
+                  >
+                    {stepLabels[step]}
+                  </span>
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      ) : null}
+
       {hasActiveBudget && summary ? (
         <div className="mt-3 space-y-1 text-xs text-muted-foreground">
           <p>
@@ -279,17 +506,38 @@ export function DelegatedBudgetManager({
           {summary.lastSettlementAt ? (
             <p>Last settlement: {formatDateTime(summary.lastSettlementAt)}</p>
           ) : null}
+          {needsReset ? (
+            <Alert variant="destructive" className="mt-3 border-2 border-foreground">
+              <AlertDescription>
+                {health?.message ??
+                  'This delegated budget needs to be reset before it can be used again.'}
+              </AlertDescription>
+            </Alert>
+          ) : null}
           <div className="mt-3 flex gap-2">
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              onClick={handleRevokeBudget}
-              disabled={isSubmitting}
-              className="border-2 border-foreground text-xs font-bold uppercase shadow-[2px_2px_0_var(--foreground)] hover:translate-x-[1px] hover:translate-y-[1px] hover:shadow-none"
-            >
-              Revoke
-            </Button>
+            {needsReset ? (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={handleResetAndRecreateBudget}
+                disabled={isSubmitting}
+                className="border-2 border-foreground text-xs font-bold uppercase shadow-[2px_2px_0_var(--foreground)] hover:translate-x-[1px] hover:translate-y-[1px] hover:shadow-none"
+              >
+                Reset and recreate
+              </Button>
+            ) : (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={handleRevokeBudget}
+                disabled={isSubmitting}
+                className="border-2 border-foreground text-xs font-bold uppercase shadow-[2px_2px_0_var(--foreground)] hover:translate-x-[1px] hover:translate-y-[1px] hover:shadow-none"
+              >
+                Revoke
+              </Button>
+            )}
           </div>
         </div>
       ) : (
@@ -357,7 +605,10 @@ export function DelegatedBudgetManager({
               <p className="text-xs text-muted-foreground">
                 Setup stores a smart-account delegation with a treasury-bound USDC
                 spend limit so later agent spends can settle without repeated wallet
-                prompts.
+                prompts. If your MetaMask smart account is still counterfactual on
+                this network, BuddyPie will ask for a one-time deployment
+                transaction first. The smart account itself must also hold enough
+                USDC on this network before the budget can be created or charged.
               </p>
 
               <Button

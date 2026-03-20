@@ -61,4 +61,10 @@ describe('preset model defaults', () => {
       requiredEnv: ['VENICE_API_KEY'],
     })
   })
+
+  test('ships a built-in kickoff prompt for the general preset', () => {
+    expect(getOpenCodeAgentPreset('general-engineer').starterPrompt.trim()).not.toBe(
+      '',
+    )
+  })
 })

@@ -15,6 +15,10 @@ export const erc20ApprovalAbi = parseAbi([
   'function allowance(address owner, address spender) view returns (uint256)',
 ])
 
+export const erc20BalanceAbi = parseAbi([
+  'function balanceOf(address owner) view returns (uint256)',
+])
+
 export const erc20TransferAbi = parseAbi([
   'function transfer(address to, uint256 amount) returns (bool)',
 ])

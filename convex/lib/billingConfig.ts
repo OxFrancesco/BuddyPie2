@@ -138,6 +138,10 @@ const billingScopedEnvAliases: Partial<
     staging: 'DB_RPC_URL_STG',
     production: 'DB_RPC_URL_PROD',
   },
+  DELEGATED_BUDGET_BUNDLER_URL: {
+    staging: 'DB_BUNDLER_URL_STG',
+    production: 'DB_BUNDLER_URL_PROD',
+  },
   DELEGATED_BUDGET_BACKEND_PRIVATE_KEY: {
     staging: 'DB_BACKEND_PK_STG',
   },
@@ -263,11 +267,15 @@ export function getDelegatedBudgetEnvironmentConfig() {
   const backendDelegateAddress = readBillingEnvironmentScopedValue(
     'DELEGATED_BUDGET_BACKEND_DELEGATE_ADDRESS',
   )
+  const bundlerUrl = readBillingEnvironmentScopedValue(
+    'DELEGATED_BUDGET_BUNDLER_URL',
+  )
 
   return {
     enabled:
       treasuryAddress.length > 0 &&
-      backendDelegateAddress.length > 0,
+      backendDelegateAddress.length > 0 &&
+      bundlerUrl.length > 0,
     chainId: billing.chainId,
     network: billing.fundingNetwork,
     tokenAddress: billing.fundingAsset,
@@ -275,6 +283,7 @@ export function getDelegatedBudgetEnvironmentConfig() {
     settlementContract,
     treasuryAddress,
     backendDelegateAddress,
+    bundlerUrl,
   } as const
 }
 

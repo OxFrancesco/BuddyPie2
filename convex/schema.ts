@@ -259,6 +259,9 @@ export default defineSchema({
     lastSettlementTxHash: v.optional(v.string()),
     lastRevokedAt: v.optional(v.number()),
     revokeTxHash: v.optional(v.string()),
+    revocationMode: v.optional(
+      v.union(v.literal('onchain'), v.literal('local_retire')),
+    ),
     createdAt: v.number(),
     updatedAt: v.number(),
   })

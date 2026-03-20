@@ -31,6 +31,8 @@ const APP_PREVIEW_BOOT_TIMEOUT_MS = 40_000
 const APP_PREVIEW_BOOT_POLL_INTERVAL_MS = 1_500
 const APP_PREVIEW_LOG_TAIL_LINES = 120
 const SHARED_ENV_FALLBACKS: Record<string, Array<string>> = {
+  VENICE_API_KEY: ['VENICE_INFERENCE_KEY'],
+  VENICE_INFERENCE_KEY: ['VENICE_API_KEY'],
   ZAI_API_KEY: ['ZHIPU_API_KEY'],
   ZHIPU_API_KEY: ['ZAI_API_KEY'],
 }
@@ -51,6 +53,11 @@ type WorkspaceBootstrapResult = {
   runtimeContext?: WorkspaceBootstrapRuntimeContext
 }
 
+type ResolvedOpenCodeLaunchConfig = {
+  preset: OpenCodeAgentPreset
+  launchEnvironment: LaunchEnvironment
+}
+
 const SEEDED_SESSION_PAYLOAD_MARKER = '__BUDDYPIE_SEEDED_SESSION__'
 
 function injectEnvVar(name: string, content: string) {
@@ -60,6 +67,29 @@ function injectEnvVar(name: string, content: string) {
 
 function quoteShellArg(value: string) {
   return `'${value.replace(/'/g, `'\\''`)}'`
+}
+
+function base64UrlEncode(value: string) {
+  return Buffer.from(value, 'utf8')
+    .toString('base64')
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=+$/g, '')
+}
+
+export function buildOpenCodeSessionPreviewUrl(
+  previewUrl: string,
+  workspacePath: string,
+  sessionId?: string,
+) {
+  if (!sessionId) {
+    return previewUrl
+  }
+
+  const trimmedPreviewUrl = previewUrl.replace(/\/+$/, '')
+  const encodedWorkspacePath = base64UrlEncode(workspacePath)
+
+  return `${trimmedPreviewUrl}/${encodedWorkspacePath}/session/${sessionId}`
 }
 
 function getRequiredDaytonaApiKey() {
@@ -534,6 +564,27 @@ function buildLaunchEnvironment(
   return environment
 }
 
+export function resolveOpenCodeLaunchConfig(args: {
+  agentPresetId: string
+  agentProvider?: string
+  agentModel?: string
+  githubToken?: string | null
+}): ResolvedOpenCodeLaunchConfig {
+  const presetDefaults = getOpenCodeAgentPreset(args.agentPresetId)
+  const modelOption = resolveOpenCodeModelOption({
+    provider: args.agentProvider,
+    model: args.agentModel,
+    fallbackProvider: presetDefaults.provider,
+    fallbackModel: presetDefaults.model,
+  })
+  const preset = withOpenCodeModelOption(presetDefaults, modelOption)
+
+  return {
+    preset,
+    launchEnvironment: buildLaunchEnvironment(preset, args.githubToken),
+  }
+}
+
 async function ensureRemoteDirectory(sandbox: Sandbox, remotePath: string) {
   await sandbox.process.executeCommand(
     `mkdir -p ${quoteShellArg(remotePath)}`,
@@ -967,6 +1018,61 @@ async function seedInitialPrompt(args: {
   const seedScript = `
 ;(async () => {
   const baseUrl = 'http://127.0.0.1:${OPENCODE_PORT}'
+  const initialPrompt = process.env.BUDDYPIE_INITIAL_PROMPT?.trim() ?? ''
+  const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
+  const waitForApi = async () => {
+    const timeoutAt = Date.now() + 45_000
+
+    while (Date.now() < timeoutAt) {
+      try {
+        const response = await fetch(\`\${baseUrl}/session/status\`)
+        if (response.ok) {
+          return
+        }
+      } catch {}
+
+      await wait(750)
+    }
+
+    throw new Error('OpenCode API did not become ready in time.')
+  }
+  const waitForAssistantMessage = async (sessionId) => {
+    if (!initialPrompt) {
+      return
+    }
+
+    const timeoutAt = Date.now() + 15_000
+
+    while (Date.now() < timeoutAt) {
+      const response = await fetch(
+        \`\${baseUrl}/session/\${sessionId}/message?limit=20\`,
+      )
+
+      if (response.ok) {
+        const messages = await response.json()
+        const assistant = Array.isArray(messages)
+          ? messages.find((message) => message?.info?.role === 'assistant')
+          : undefined
+
+        if (assistant?.info?.error) {
+          const detail =
+            assistant.info.error.message ||
+            assistant.info.error.data?.message ||
+            JSON.stringify(assistant.info.error)
+          throw new Error(\`OpenCode prompt failed: \${detail}\`)
+        }
+
+        if (assistant) {
+          return
+        }
+      }
+
+      await wait(500)
+    }
+  }
+
+  await waitForApi()
+
   const sessionResponse = await fetch(\`\${baseUrl}/session\`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
@@ -976,17 +1082,23 @@ async function seedInitialPrompt(args: {
     throw new Error(\`OpenCode session creation failed: \${sessionResponse.status} \${await sessionResponse.text()}\`)
   }
   const session = await sessionResponse.json()
-  const promptResponse = await fetch(\`\${baseUrl}/session/\${session.id}/prompt_async\`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({
-      agent: process.env.BUDDYPIE_AGENT_ID,
-      parts: [{ type: 'text', text: process.env.BUDDYPIE_INITIAL_PROMPT }],
-    }),
-  })
-  if (!promptResponse.ok && promptResponse.status !== 204) {
-    throw new Error(\`OpenCode prompt injection failed: \${promptResponse.status} \${await promptResponse.text()}\`)
+
+  if (initialPrompt) {
+    const promptResponse = await fetch(\`\${baseUrl}/session/\${session.id}/prompt_async\`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        agent: process.env.BUDDYPIE_AGENT_ID,
+        parts: [{ type: 'text', text: initialPrompt }],
+      }),
+    })
+    if (!promptResponse.ok && promptResponse.status !== 204) {
+      throw new Error(\`OpenCode prompt injection failed: \${promptResponse.status} \${await promptResponse.text()}\`)
+    }
+
+    await waitForAssistantMessage(session.id)
   }
+
   process.stdout.write('${SEEDED_SESSION_PAYLOAD_MARKER}' + JSON.stringify({ sessionId: session.id }))
 })().catch((error) => {
   console.error(error instanceof Error ? error.message : String(error))
@@ -1001,7 +1113,7 @@ async function seedInitialPrompt(args: {
       BUDDYPIE_INITIAL_PROMPT: args.initialPrompt,
       BUDDYPIE_SESSION_TITLE: `${args.repoName} - ${args.preset.label}`,
     },
-    60,
+    90,
   )) as ExecuteCommandResponse
   const stdout = getCommandStdout(response).trim()
 
@@ -1037,14 +1149,12 @@ export async function createOpenCodeSandbox(args: {
     apiKey: getRequiredDaytonaApiKey(),
     apiUrl: getDaytonaApiUrl(),
   })
-  const presetDefaults = getOpenCodeAgentPreset(args.agentPresetId)
-  const modelOption = resolveOpenCodeModelOption({
-    provider: args.agentProvider,
-    model: args.agentModel,
-    fallbackProvider: presetDefaults.provider,
-    fallbackModel: presetDefaults.model,
+  const { preset, launchEnvironment } = resolveOpenCodeLaunchConfig({
+    agentPresetId: args.agentPresetId,
+    agentProvider: args.agentProvider,
+    agentModel: args.agentModel,
+    githubToken: args.githubToken,
   })
-  const preset = withOpenCodeModelOption(presetDefaults, modelOption)
   let sandbox: Sandbox | undefined
 
   try {
@@ -1066,7 +1176,6 @@ export async function createOpenCodeSandbox(args: {
       workspacePath: repo.workspacePath,
       preset,
     })
-    const launchEnvironment = buildLaunchEnvironment(preset, args.githubToken)
     const seededInitialPrompt = buildInitialPromptContent(
       repo.initialPrompt,
       workspaceBootstrap.runtimeContext,
@@ -1099,12 +1208,18 @@ export async function createOpenCodeSandbox(args: {
       initialPrompt: seededInitialPrompt,
     })
 
+    const sessionPreviewUrl = buildOpenCodeSessionPreviewUrl(
+      previewUrl,
+      repo.workspacePath,
+      opencodeSessionId,
+    )
+
     return {
       repoName: repo.repoName,
       repoProvider: repo.repoProvider,
       branch: repo.branch,
       workspacePath: repo.workspacePath,
-      previewUrl,
+      previewUrl: sessionPreviewUrl,
       previewUrlPattern,
       daytonaSandboxId: sandbox.id,
       opencodeSessionId,

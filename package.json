@@ -4,9 +4,9 @@
   "sideEffects": false,
   "type": "module",
   "scripts": {
-    "dev": "bunx convex dev --once && concurrently -r bun:dev:web bun:dev:convex",
+    "dev": "bun --env-file=.env.local x convex dev --once && concurrently -r bun:dev:web bun:dev:convex",
     "dev:web": "vite dev",
-    "dev:convex": "npx convex dev",
+    "dev:convex": "bun --env-file=.env.local x convex dev",
     "build": "vite build && tsc --noEmit",
     "test": "bun test",
     "start": "node .output/server/index.mjs",

@@ -11,6 +11,7 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as AuthedRouteImport } from './routes/_authed'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as AuthedProfileRouteImport } from './routes/_authed/profile'
 import { Route as AuthedDashboardRouteImport } from './routes/_authed/dashboard'
 import { Route as ApiBillingClerkWebhookRouteImport } from './routes/api/billing/clerk-webhook'
 import { Route as AuthedSandboxesSandboxIdRouteImport } from './routes/_authed/sandboxes/$sandboxId'
@@ -28,6 +29,11 @@ const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
   getParentRoute: () => rootRouteImport,
+} as any)
+const AuthedProfileRoute = AuthedProfileRouteImport.update({
+  id: '/profile',
+  path: '/profile',
+  getParentRoute: () => AuthedRoute,
 } as any)
 const AuthedDashboardRoute = AuthedDashboardRouteImport.update({
   id: '/dashboard',
@@ -78,6 +84,7 @@ const ApiX402SandboxesSandboxIdPreviewRoute =
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/dashboard': typeof AuthedDashboardRoute
+  '/profile': typeof AuthedProfileRoute
   '/sandboxes/$sandboxId': typeof AuthedSandboxesSandboxIdRoute
   '/api/billing/clerk-webhook': typeof ApiBillingClerkWebhookRoute
   '/api/x402/sandboxes/create': typeof ApiX402SandboxesCreateRoute
@@ -89,6 +96,7 @@ export interface FileRoutesByFullPath {
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/dashboard': typeof AuthedDashboardRoute
+  '/profile': typeof AuthedProfileRoute
   '/sandboxes/$sandboxId': typeof AuthedSandboxesSandboxIdRoute
   '/api/billing/clerk-webhook': typeof ApiBillingClerkWebhookRoute
   '/api/x402/sandboxes/create': typeof ApiX402SandboxesCreateRoute
@@ -102,6 +110,7 @@ export interface FileRoutesById {
   '/': typeof IndexRoute
   '/_authed': typeof AuthedRouteWithChildren
   '/_authed/dashboard': typeof AuthedDashboardRoute
+  '/_authed/profile': typeof AuthedProfileRoute
   '/_authed/sandboxes/$sandboxId': typeof AuthedSandboxesSandboxIdRoute
   '/api/billing/clerk-webhook': typeof ApiBillingClerkWebhookRoute
   '/api/x402/sandboxes/create': typeof ApiX402SandboxesCreateRoute
@@ -115,6 +124,7 @@ export interface FileRouteTypes {
   fullPaths:
     | '/'
     | '/dashboard'
+    | '/profile'
     | '/sandboxes/$sandboxId'
     | '/api/billing/clerk-webhook'
     | '/api/x402/sandboxes/create'
@@ -126,6 +136,7 @@ export interface FileRouteTypes {
   to:
     | '/'
     | '/dashboard'
+    | '/profile'
     | '/sandboxes/$sandboxId'
     | '/api/billing/clerk-webhook'
     | '/api/x402/sandboxes/create'
@@ -138,6 +149,7 @@ export interface FileRouteTypes {
     | '/'
     | '/_authed'
     | '/_authed/dashboard'
+    | '/_authed/profile'
     | '/_authed/sandboxes/$sandboxId'
     | '/api/billing/clerk-webhook'
     | '/api/x402/sandboxes/create'
@@ -173,6 +185,13 @@ declare module '@tanstack/react-router' {
       fullPath: '/'
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
+    }
+    '/_authed/profile': {
+      id: '/_authed/profile'
+      path: '/profile'
+      fullPath: '/profile'
+      preLoaderRoute: typeof AuthedProfileRouteImport
+      parentRoute: typeof AuthedRoute
     }
     '/_authed/dashboard': {
       id: '/_authed/dashboard'
@@ -235,11 +254,13 @@ declare module '@tanstack/react-router' {
 
 interface AuthedRouteChildren {
   AuthedDashboardRoute: typeof AuthedDashboardRoute
+  AuthedProfileRoute: typeof AuthedProfileRoute
   AuthedSandboxesSandboxIdRoute: typeof AuthedSandboxesSandboxIdRoute
 }
 
 const AuthedRouteChildren: AuthedRouteChildren = {
   AuthedDashboardRoute: AuthedDashboardRoute,
+  AuthedProfileRoute: AuthedProfileRoute,
   AuthedSandboxesSandboxIdRoute: AuthedSandboxesSandboxIdRoute,
 }
 

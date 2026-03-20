@@ -111,9 +111,25 @@ type SyncDelegatedBudgetInput = {
   lastSettlementTxHash?: string
 }
 
+export type DelegatedBudgetHealthResult = {
+  delegatedBudgetId: string
+  health: 'usable' | 'needs_recreate'
+  healthReason:
+    | 'revoked'
+    | 'expired'
+    | 'undeployed_smart_account'
+    | 'delegate_mismatch'
+    | 'treasury_mismatch'
+    | 'missing_treasury'
+    | 'invalid_delegation'
+    | 'unknown'
+  message: string
+}
+
 type RevokeDelegatedBudgetInput = {
   delegatedBudgetId: string
-  revokeTxHash: string
+  revokeTxHash?: string
+  revocationMode: 'onchain' | 'local_retire'
 }
 
 export const createDelegatedBudget = createServerFn({ method: 'POST' })
@@ -184,6 +200,29 @@ export const refreshDelegatedBudgetState = createServerFn({ method: 'POST' })
     })
   })
 
+export const readCurrentDelegatedBudgetHealth = createServerFn({
+  method: 'GET',
+}).handler(async (): Promise<DelegatedBudgetHealthResult | null> => {
+  const { convex } = await getAuthenticatedConvexClient()
+  const { readDelegatedBudgetHealth } = await import(
+    '~/lib/server/delegated-budget'
+  )
+  const budget = await convex.query(api.billing.currentDelegatedBudget, {})
+
+  if (!budget) {
+    return null
+  }
+
+  const health = await readDelegatedBudgetHealth(budget)
+
+  return {
+    delegatedBudgetId: String(budget._id),
+    health: health.health,
+    healthReason: health.healthReason,
+    message: health.message,
+  }
+})
+
 export const revokeDelegatedBudget = createServerFn({ method: 'POST' })
   .inputValidator((data: RevokeDelegatedBudgetInput) => data)
   .handler(async ({ data }) => {
@@ -199,13 +238,19 @@ export const revokeDelegatedBudget = createServerFn({ method: 'POST' })
       throw new Error('Delegated budget not found.')
     }
 
-    const onchainBudget = await readDelegatedBudgetOnchain(budget)
+    const onchainBudget =
+      data.revocationMode === 'onchain'
+        ? await readDelegatedBudgetOnchain(budget)
+        : null
 
     return await convex.mutation(api.billing.revokeDelegatedBudget, {
       delegatedBudgetId: data.delegatedBudgetId as Id<'delegatedBudgets'>,
-      revokeTxHash: data.revokeTxHash,
-      remainingAmountUsdCents: onchainBudget.remainingAmountUsdCents,
-      ...(onchainBudget.lastRevokedAt
+      ...(data.revokeTxHash ? { revokeTxHash: data.revokeTxHash } : {}),
+      revocationMode: data.revocationMode,
+      remainingAmountUsdCents:
+        onchainBudget?.remainingAmountUsdCents ??
+        budget.remainingAmountUsdCents,
+      ...(onchainBudget?.lastRevokedAt
         ? { lastRevokedAt: onchainBudget.lastRevokedAt }
         : {}),
     })

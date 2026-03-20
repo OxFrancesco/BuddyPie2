@@ -1,8 +1,9 @@
 import { ConvexError, v } from 'convex/values'
 import type { Id } from './_generated/dataModel'
 import { internalMutation, mutation, query } from './_generated/server'
-import { requireCurrentUserRecord } from './lib/auth'
+import { getCurrentUserRecord, requireCurrentUserRecord } from './lib/auth'
 import {
+  BILLING_CURRENCY,
   BILLING_PRICE_VERSION,
   getDelegatedBudgetEnvironmentConfig,
   getBillingEnvironmentConfig,
@@ -241,6 +242,9 @@ const delegatedBudgetRecordValidator = v.object({
   lastSettlementTxHash: v.optional(v.string()),
   lastRevokedAt: v.optional(v.number()),
   revokeTxHash: v.optional(v.string()),
+  revocationMode: v.optional(
+    v.union(v.literal('onchain'), v.literal('local_retire')),
+  ),
   createdAt: v.number(),
   updatedAt: v.number(),
 })
@@ -330,6 +334,24 @@ function mapLegacyUsageEventToCharge(
   return mappedCharge
 }
 
+function buildEmptyWalletSnapshot() {
+  const environment = getBillingEnvironmentConfig()
+
+  return {
+    accountId: undefined,
+    currency: BILLING_CURRENCY,
+    availableUsdCents: 0,
+    heldUsdCents: 0,
+    lifetimeCreditedUsdCents: 0,
+    lifetimeSpentUsdCents: 0,
+    fundingAsset: 'USDC' as const,
+    fundingNetwork: environment.fundingNetwork,
+    environment: environment.environment,
+    chainId: environment.chainId,
+    x402Network: environment.x402Network,
+  }
+}
+
 export const dashboardSummary = query({
   args: {},
   returns: v.object({
@@ -340,7 +362,18 @@ export const dashboardSummary = query({
     delegatedBudget: v.union(delegatedBudgetValidator, v.null()),
   }),
   handler: async (ctx) => {
-    const user = await requireCurrentUserRecord(ctx)
+    const user = await getCurrentUserRecord(ctx)
+
+    if (!user) {
+      return {
+        wallet: buildEmptyWalletSnapshot(),
+        recentCharges: [],
+        recentLedger: [],
+        currentPlan: null,
+        delegatedBudget: null,
+      }
+    }
+
     const wallet = await getWalletSnapshot(ctx, user._id)
     const account = await getCreditAccount(ctx, user._id)
     const recentCharges = account
@@ -381,7 +414,17 @@ export const sandboxUsage = query({
     delegatedBudget: v.union(delegatedBudgetValidator, v.null()),
   }),
   handler: async (ctx, args) => {
-    const user = await requireCurrentUserRecord(ctx)
+    const user = await getCurrentUserRecord(ctx)
+
+    if (!user) {
+      return {
+        billedUsdCents: 0,
+        wallet: null,
+        charges: [],
+        delegatedBudget: null,
+      }
+    }
+
     const sandbox = await ctx.db.get(args.sandboxId)
 
     if (!sandbox || sandbox.userId !== user._id) {
@@ -568,7 +611,11 @@ export const createDelegatedBudget = mutation({
 export const revokeDelegatedBudget = mutation({
   args: {
     delegatedBudgetId: v.id('delegatedBudgets'),
-    revokeTxHash: v.string(),
+    revokeTxHash: v.optional(v.string()),
+    revocationMode: v.union(
+      v.literal('onchain'),
+      v.literal('local_retire'),
+    ),
     remainingAmountUsdCents: v.number(),
     lastRevokedAt: v.optional(v.number()),
   },
@@ -614,7 +661,12 @@ export const currentDelegatedBudget = query({
   args: {},
   returns: v.union(delegatedBudgetRecordValidator, v.null()),
   handler: async (ctx) => {
-    const user = await requireCurrentUserRecord(ctx)
+    const user = await getCurrentUserRecord(ctx)
+
+    if (!user) {
+      return null
+    }
+
     const budgets = await ctx.db
       .query('delegatedBudgets')
       .withIndex('by_user_and_created_at', (q) => q.eq('userId', user._id))
@@ -631,7 +683,12 @@ export const delegatedBudgetById = query({
   },
   returns: v.union(delegatedBudgetRecordValidator, v.null()),
   handler: async (ctx, args) => {
-    const user = await requireCurrentUserRecord(ctx)
+    const user = await getCurrentUserRecord(ctx)
+
+    if (!user) {
+      return null
+    }
+
     const budget = await ctx.db.get(args.delegatedBudgetId)
 
     if (!budget || budget.userId !== user._id) {
@@ -646,7 +703,11 @@ export const listDelegatedBudgetSettlements = query({
   args: {},
   returns: v.array(delegatedBudgetSettlementValidator),
   handler: async (ctx) => {
-    const user = await requireCurrentUserRecord(ctx)
+    const user = await getCurrentUserRecord(ctx)
+
+    if (!user) {
+      return []
+    }
 
     return await ctx.db
       .query('delegatedBudgetSettlements')
@@ -837,6 +898,7 @@ export const pricingCatalog = query({
         settlementContract: v.string(),
         treasuryAddress: v.string(),
         backendDelegateAddress: v.string(),
+        bundlerUrl: v.string(),
       }),
     }),
   }),

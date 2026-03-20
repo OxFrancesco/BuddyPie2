@@ -55,7 +55,13 @@ function AuthedLayout() {
             />
             <span>BuddyPie</span>
           </Link>
-          <div className="flex shrink-0 items-center">
+          <div className="flex shrink-0 items-center gap-4">
+            <Link
+              to="/profile"
+              className="text-xs font-black uppercase tracking-widest text-muted-foreground transition-colors hover:text-foreground [&.active]:text-foreground"
+            >
+              Profile
+            </Link>
             <UserButton
               appearance={{
                 elements: {

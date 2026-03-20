@@ -138,7 +138,8 @@ This sandbox was launched from BuddyPie with the general-purpose engineering pre
 - \`buddypie-general-architecture\` for repo walkthroughs, system mapping, and change planning.
 - \`buddypie-general-release-check\` before final verification and handoff.
 `.trim(),
-    starterPrompt: '',
+    starterPrompt:
+      'Inspect this repository, identify the files and systems relevant to the requested task, and start with the smallest high-confidence plan before editing. Then implement the change, verify the behavior you touched, and summarize the result with any remaining risks or follow-up work.',
     starterPromptPlaceholder:
       'Describe the feature, bug, or refactor you want this workspace to tackle.',
     skills: [

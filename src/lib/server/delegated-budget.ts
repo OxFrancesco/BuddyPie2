@@ -23,6 +23,7 @@ import { privateKeyToAccount } from 'viem/accounts'
 import { base, baseSepolia } from 'viem/chains'
 import {
   advanceDelegatedBudgetPeriodEndMs,
+  erc20BalanceAbi,
   erc20TransferAbi,
   type DelegatedBudgetInterval,
   type DelegatedBudgetType,
@@ -43,6 +44,16 @@ type SignerServiceConfig = {
 }
 
 type DelegatedBudgetStatus = 'active' | 'revoked' | 'expired' | 'pending'
+export type DelegatedBudgetHealth = 'usable' | 'needs_recreate'
+export type DelegatedBudgetHealthReason =
+  | 'revoked'
+  | 'expired'
+  | 'undeployed_smart_account'
+  | 'delegate_mismatch'
+  | 'treasury_mismatch'
+  | 'missing_treasury'
+  | 'invalid_delegation'
+  | 'unknown'
 
 export type DelegatedBudgetRecordInput = {
   status?: DelegatedBudgetStatus
@@ -76,6 +87,13 @@ export type DelegatedBudgetOnchainState = {
   periodEndsAt: number | null
   lastSettlementAt: number | null
   lastRevokedAt: number | null
+}
+
+export type DelegatedBudgetHealthState = {
+  health: DelegatedBudgetHealth
+  healthReason: DelegatedBudgetHealthReason
+  message: string
+  budget: DelegatedBudgetOnchainState | null
 }
 
 function resolveDelegatedBudgetChain(): ChainConfig {
@@ -180,8 +198,42 @@ function createLocalOnchainClients() {
   }
 }
 
+function buildDelegatedBudgetHealthMessage(
+  reason: DelegatedBudgetHealthReason,
+) {
+  switch (reason) {
+    case 'revoked':
+      return 'This delegated budget is no longer active. Reset and recreate it before using this payment rail.'
+    case 'expired':
+      return 'This delegated budget has expired. Reset and recreate it before using this payment rail.'
+    case 'undeployed_smart_account':
+      return 'The delegated budget smart account is not deployed onchain yet. Reset and recreate the budget so BuddyPie can deploy it first.'
+    case 'delegate_mismatch':
+      return 'This delegated budget was signed for a different backend delegate. Reset and recreate it before using this payment rail.'
+    case 'treasury_mismatch':
+      return 'This delegated budget points at a different treasury than BuddyPie uses now. Reset and recreate it before using this payment rail.'
+    case 'missing_treasury':
+      return 'This delegated budget is missing its treasury target. Reset and recreate it before using this payment rail.'
+    case 'invalid_delegation':
+      return 'The stored delegated-budget signature no longer matches its delegation payload. Reset and recreate it before using this payment rail.'
+    default:
+      return 'BuddyPie could not validate this delegated budget. Reset and recreate it before using this payment rail.'
+  }
+}
+
 function atomicToUsdCents(value: bigint) {
   return Number(value / 10_000n)
+}
+
+function buildDelegatedBudgetFundingMessage(args: {
+  balanceUsdCents: number
+  requiredAmountUsdCents: number
+  actionLabel: string
+  smartAccountAddress: Address
+}) {
+  const chain = resolveDelegatedBudgetChain()
+
+  return `Your MetaMask smart account only has ${formatUsdCents(args.balanceUsdCents)} USDC on ${chain.name}. Fund ${getAddress(args.smartAccountAddress)} before ${args.actionLabel} (${formatUsdCents(args.requiredAmountUsdCents)} required).`
 }
 
 function parseDelegation(delegationJson: string) {
@@ -190,6 +242,39 @@ function parseDelegation(delegationJson: string) {
 
 function computeDelegationHash(delegationJson: string) {
   return hashDelegation(parseDelegation(delegationJson) as never)
+}
+
+async function assertDeployedDelegatorSmartAccount(address: Address) {
+  const { publicClient } = createOnchainReadContext()
+  const code = await publicClient.getCode({
+    address: getAddress(address),
+  })
+
+  if (!code || code === '0x') {
+    throw new Error(
+      'The delegated budget smart account is not deployed onchain. Re-create the budget after deploying the MetaMask smart account.',
+    )
+  }
+}
+
+async function isDelegatorSmartAccountDeployed(address: Address) {
+  const { publicClient } = createOnchainReadContext()
+  const code = await publicClient.getCode({
+    address: getAddress(address),
+  })
+
+  return Boolean(code) && code !== '0x'
+}
+
+async function readDelegatorSmartAccountTokenBalanceAtomic(address: Address) {
+  const { delegatedBudget, publicClient } = createOnchainReadContext()
+
+  return await publicClient.readContract({
+    address: delegatedBudget.tokenAddress as Address,
+    abi: erc20BalanceAbi,
+    functionName: 'balanceOf',
+    args: [getAddress(address)],
+  })
 }
 
 function normalizeDelegationHash(args: {
@@ -236,6 +321,82 @@ function normalizePeriodicWindow(args: {
   return {
     periodStartedAt,
     periodEndsAt,
+  }
+}
+
+export function classifyDelegatedBudgetHealth(args: {
+  budgetStatus?: DelegatedBudgetStatus
+  delegationExpiresAt?: number
+  delegateMatchesEnvironment: boolean
+  treasuryMatchesEnvironment: boolean
+  hasTreasuryAddress: boolean
+  delegationHashMatches: boolean
+  delegatorSmartAccountDeployed: boolean
+  onchainStatus?: DelegatedBudgetOnchainState['status'] | null
+  now?: number
+}): {
+  health: DelegatedBudgetHealth
+  healthReason: DelegatedBudgetHealthReason
+} {
+  const now = args.now ?? Date.now()
+
+  if (!args.delegationHashMatches) {
+    return {
+      health: 'needs_recreate',
+      healthReason: 'invalid_delegation',
+    }
+  }
+
+  if (!args.hasTreasuryAddress) {
+    return {
+      health: 'needs_recreate',
+      healthReason: 'missing_treasury',
+    }
+  }
+
+  if (!args.delegateMatchesEnvironment) {
+    return {
+      health: 'needs_recreate',
+      healthReason: 'delegate_mismatch',
+    }
+  }
+
+  if (!args.treasuryMatchesEnvironment) {
+    return {
+      health: 'needs_recreate',
+      healthReason: 'treasury_mismatch',
+    }
+  }
+
+  if (args.budgetStatus === 'revoked' || args.onchainStatus === 'revoked') {
+    return {
+      health: 'needs_recreate',
+      healthReason: 'revoked',
+    }
+  }
+
+  if (
+    args.budgetStatus === 'expired' ||
+    args.onchainStatus === 'expired' ||
+    (typeof args.delegationExpiresAt === 'number' &&
+      args.delegationExpiresAt <= now)
+  ) {
+    return {
+      health: 'needs_recreate',
+      healthReason: 'expired',
+    }
+  }
+
+  if (!args.delegatorSmartAccountDeployed) {
+    return {
+      health: 'needs_recreate',
+      healthReason: 'undeployed_smart_account',
+    }
+  }
+
+  return {
+    health: 'usable',
+    healthReason: 'unknown',
   }
 }
 
@@ -299,6 +460,105 @@ async function isDelegationDisabled(delegationHash: Hex) {
   })
 }
 
+export async function readDelegatedBudgetHealth(
+  budget: DelegatedBudgetRecordInput,
+): Promise<DelegatedBudgetHealthState> {
+  const environmentConfig = getDelegatedBudgetEnvironmentConfig()
+
+  if (!environmentConfig.enabled) {
+    return {
+      health: 'needs_recreate',
+      healthReason: 'unknown',
+      message: 'Delegated budgets are not configured in this environment yet.',
+      budget: null,
+    }
+  }
+
+  const normalizedTreasury = budget.treasuryAddress?.trim()
+    ? getAddress(budget.treasuryAddress as Address)
+    : null
+  const delegateMatchesEnvironment =
+    getAddress(budget.delegateAddress as Address) ===
+    getAddress(environmentConfig.backendDelegateAddress as Address)
+  const treasuryMatchesEnvironment =
+    normalizedTreasury !== null &&
+    normalizedTreasury === getAddress(environmentConfig.treasuryAddress as Address)
+  let delegationHashMatches = true
+
+  try {
+    normalizeDelegationHash({
+      delegationJson: budget.delegationJson,
+      delegationHash: budget.delegationHash,
+    })
+  } catch {
+    delegationHashMatches = false
+  }
+
+  const deployed = await isDelegatorSmartAccountDeployed(
+    budget.delegatorSmartAccount as Address,
+  )
+  const baseClassification = classifyDelegatedBudgetHealth({
+    budgetStatus: budget.status,
+    delegationExpiresAt: budget.delegationExpiresAt,
+    delegateMatchesEnvironment,
+    treasuryMatchesEnvironment,
+    hasTreasuryAddress: Boolean(normalizedTreasury),
+    delegationHashMatches,
+    delegatorSmartAccountDeployed: deployed,
+  })
+
+  if (baseClassification.health !== 'usable') {
+    return {
+      ...baseClassification,
+      message: buildDelegatedBudgetHealthMessage(baseClassification.healthReason),
+      budget: null,
+    }
+  }
+
+  try {
+    const onchainBudget = await readDelegatedBudgetOnchain(budget)
+    const onchainClassification = classifyDelegatedBudgetHealth({
+      budgetStatus: budget.status,
+      delegationExpiresAt: budget.delegationExpiresAt,
+      delegateMatchesEnvironment,
+      treasuryMatchesEnvironment,
+      hasTreasuryAddress: Boolean(normalizedTreasury),
+      delegationHashMatches,
+      delegatorSmartAccountDeployed: deployed,
+      onchainStatus: onchainBudget.status,
+    })
+
+    if (onchainClassification.health !== 'usable') {
+      return {
+        ...onchainClassification,
+        message: buildDelegatedBudgetHealthMessage(
+          onchainClassification.healthReason,
+        ),
+        budget: onchainBudget,
+      }
+    }
+
+    return {
+      health: 'usable',
+      healthReason: 'unknown',
+      message: 'Delegated budget is ready to use.',
+      budget: onchainBudget,
+    }
+  } catch (error) {
+    const message =
+      error instanceof Error && error.message.trim()
+        ? error.message
+        : buildDelegatedBudgetHealthMessage('unknown')
+
+    return {
+      health: 'needs_recreate',
+      healthReason: 'unknown',
+      message,
+      budget: null,
+    }
+  }
+}
+
 export function buildDelegatedBudgetSettlementId(idempotencyKey: string) {
   return keccak256(stringToHex(`settlement:${idempotencyKey}`))
 }
@@ -306,6 +566,9 @@ export function buildDelegatedBudgetSettlementId(idempotencyKey: string) {
 export async function readDelegatedBudgetOnchain(
   budget: DelegatedBudgetRecordInput,
 ) {
+  await assertDeployedDelegatorSmartAccount(
+    budget.delegatorSmartAccount as Address,
+  )
   const delegationHash = normalizeDelegationHash({
     delegationJson: budget.delegationJson,
     delegationHash: budget.delegationHash,
@@ -349,7 +612,13 @@ export async function assertDelegatedBudgetAllowanceOrThrow(args: {
     throw new Error('Delegated budget allowance checks require a positive amount.')
   }
 
-  const budget = await readDelegatedBudgetOnchain(args.budget)
+  const health = await readDelegatedBudgetHealth(args.budget)
+
+  if (health.health !== 'usable' || !health.budget) {
+    throw new Error(health.message)
+  }
+
+  const budget = health.budget
 
   if (budget.status !== 'active') {
     throw new Error(
@@ -360,6 +629,21 @@ export async function assertDelegatedBudgetAllowanceOrThrow(args: {
   if (budget.remainingAmountUsdCents < args.requiredAmountUsdCents) {
     throw new Error(
       `Your delegated budget has only ${formatUsdCents(budget.remainingAmountUsdCents)} left, which is not enough for ${args.actionLabel} (${formatUsdCents(args.requiredAmountUsdCents)} required).`,
+    )
+  }
+
+  const balanceAtomic = await readDelegatorSmartAccountTokenBalanceAtomic(
+    budget.delegatorSmartAccount,
+  )
+
+  if (balanceAtomic < usdCentsToUsdcAtomic(args.requiredAmountUsdCents)) {
+    throw new Error(
+      buildDelegatedBudgetFundingMessage({
+        balanceUsdCents: atomicToUsdCents(balanceAtomic),
+        requiredAmountUsdCents: args.requiredAmountUsdCents,
+        actionLabel: args.actionLabel,
+        smartAccountAddress: budget.delegatorSmartAccount,
+      }),
     )
   }
 
@@ -496,6 +780,9 @@ export async function settleDelegatedBudgetOnchain(args: {
     requiredAmountUsdCents: args.amountUsdCents,
     actionLabel: 'settling a delegated-budget charge',
   })
+  await assertDeployedDelegatorSmartAccount(
+    args.budget.delegatorSmartAccount as Address,
+  )
 
   const settlementId = buildDelegatedBudgetSettlementId(args.idempotencyKey)
   const treasuryAddress =
@@ -508,20 +795,46 @@ export async function settleDelegatedBudgetOnchain(args: {
     )
   }
 
-  const txHash =
-    getBillingEnvironmentConfig().environment === 'production'
-      ? await submitDelegatedBudgetSettlementViaSignerService({
-          contractBudgetId: args.budget.contractBudgetId,
-          delegationJson: args.budget.delegationJson,
-          amountUsdCents: args.amountUsdCents,
-          settlementId,
-          treasuryAddress,
-        })
-      : await submitDelegatedBudgetSettlementLocally({
-          delegationJson: args.budget.delegationJson,
-          amountUsdCents: args.amountUsdCents,
-          treasuryAddress,
-        })
+  let txHash: Hex
+
+  try {
+    txHash =
+      getBillingEnvironmentConfig().environment === 'production'
+        ? await submitDelegatedBudgetSettlementViaSignerService({
+            contractBudgetId: args.budget.contractBudgetId,
+            delegationJson: args.budget.delegationJson,
+            amountUsdCents: args.amountUsdCents,
+            settlementId,
+            treasuryAddress,
+          })
+        : await submitDelegatedBudgetSettlementLocally({
+            delegationJson: args.budget.delegationJson,
+            amountUsdCents: args.amountUsdCents,
+            treasuryAddress,
+          })
+  } catch (error) {
+    const message =
+      error instanceof Error && error.message.trim()
+        ? error.message
+        : 'Delegated-budget settlement failed.'
+
+    if (/transfer amount exceeds balance/i.test(message)) {
+      const balanceAtomic = await readDelegatorSmartAccountTokenBalanceAtomic(
+        args.budget.delegatorSmartAccount as Address,
+      )
+
+      throw new Error(
+        buildDelegatedBudgetFundingMessage({
+          balanceUsdCents: atomicToUsdCents(balanceAtomic),
+          requiredAmountUsdCents: args.amountUsdCents,
+          actionLabel: 'settling a delegated-budget charge',
+          smartAccountAddress: args.budget.delegatorSmartAccount as Address,
+        }),
+      )
+    }
+
+    throw error
+  }
   const budget = await readDelegatedBudgetOnchain(args.budget)
 
   return {

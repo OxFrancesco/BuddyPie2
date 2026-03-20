@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useState } from 'react'
 import { convexQuery } from '@convex-dev/react-query'
 import { createFileRoute, useNavigate } from '@tanstack/react-router'
 import {
@@ -8,7 +8,6 @@ import {
 } from '@tanstack/react-query'
 import { api } from 'convex/_generated/api'
 import type { ChangeEvent, FormEvent } from 'react'
-import { DelegatedBudgetManager } from '~/components/delegated-budget-manager'
 import { DeleteSandboxModal } from '~/components/delete-sandbox-modal'
 import { PaymentMethodToggle } from '~/components/payment-method-toggle'
 import { SandboxCard } from '~/components/sandbox-card'
@@ -18,7 +17,6 @@ import { Button } from '~/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '~/components/ui/card'
 import { Input } from '~/components/ui/input'
 import { Textarea } from '~/components/ui/textarea'
-import { syncCurrentClerkBillingState } from '~/features/billing/server'
 import type { GithubRepoOption } from '~/features/sandboxes/server'
 import {
   checkGithubConnection,
@@ -29,22 +27,12 @@ import {
   restartSandbox,
 } from '~/features/sandboxes/server'
 import { formatUsdCents } from '~/lib/billing/format'
-import {
-  formatBillingPlanPeriod,
-  formatBillingPlanStatus,
-  formatSandboxPaymentMethod,
-} from '~/lib/billing/presentation'
+import { formatSandboxPaymentMethod } from '~/lib/billing/presentation'
 import { postJsonWithX402Payment } from '~/lib/billing/x402-client'
-import type {
-  OpenCodeAgentPresetId,
-  OpenCodeModelOptionId,
-} from '~/lib/opencode/presets'
+import type { OpenCodeAgentPresetId } from '~/lib/opencode/presets'
 import {
-  defaultOpenCodeModelOptionId,
   getOpenCodeAgentPreset,
-  getOpenCodeModelOption,
   openCodeAgentPresets,
-  openCodeModelOptions,
 } from '~/lib/opencode/presets'
 import {
   isX402SandboxPaymentMethod,
@@ -58,21 +46,6 @@ type X402SandboxActionResult = {
   agentPresetId: string
 }
 
-type DelegatedBudgetSummary = {
-  status?: string | null
-  type?: 'fixed' | 'periodic' | null
-  interval?: 'day' | 'week' | 'month' | null
-  token?: string | null
-  network?: string | null
-  configuredAmountUsdCents?: number | null
-  remainingAmountUsdCents?: number | null
-  periodEndsAt?: string | number | null
-  delegatorSmartAccount?: string | null
-  delegateAddress?: string | null
-  lastSettlementAt?: string | number | null
-  lastRevokedAt?: string | number | null
-}
-
 export const Route = createFileRoute('/_authed/dashboard')({
   loader: async ({ context }) => {
     await Promise.all([
@@ -83,9 +56,6 @@ export const Route = createFileRoute('/_authed/dashboard')({
       ),
       context.queryClient.ensureQueryData(
         convexQuery(api.billing.pricingCatalog, {}),
-      ),
-      context.queryClient.ensureQueryData(
-        convexQuery(api.billing.currentDelegatedBudget, {}),
       ),
     ])
 
@@ -112,13 +82,8 @@ function DashboardRoute() {
   const { data: pricingCatalog } = useSuspenseQuery(
     convexQuery(api.billing.pricingCatalog, {}),
   )
-  const { data: delegatedBudgetRecord } = useSuspenseQuery(
-    convexQuery(api.billing.currentDelegatedBudget, {}),
-  )
   const [agentPresetId, setAgentPresetId] =
     useState<OpenCodeAgentPresetId>('general-engineer')
-  const [agentModelOptionId, setAgentModelOptionId] =
-    useState<OpenCodeModelOptionId>(defaultOpenCodeModelOptionId)
   const [paymentMethod, setPaymentMethod] =
     useState<SandboxPaymentMethod>('credits')
   const [initialPrompt, setInitialPrompt] = useState('')
@@ -126,11 +91,8 @@ function DashboardRoute() {
   const [branch, setBranch] = useState('')
   const [formError, setFormError] = useState<string | null>(null)
   const [actionError, setActionError] = useState<string | null>(null)
-  const [billingError, setBillingError] = useState<string | null>(null)
-  const [billingSuccess, setBillingSuccess] = useState<string | null>(null)
   const [isCreating, setIsCreating] = useState(false)
   const [busySandboxId, setBusySandboxId] = useState<string | null>(null)
-  const [isBillingSyncing, setIsBillingSyncing] = useState(false)
   const [githubBranches, setGithubBranches] = useState<Array<string>>([])
   const [githubPickerError, setGithubPickerError] = useState<string | null>(
     null,
@@ -142,14 +104,6 @@ function DashboardRoute() {
   const [deleteModalSandboxId, setDeleteModalSandboxId] = useState<
     string | null
   >(null)
-  const hasAutoSyncedBilling = useRef(false)
-  const billingSummaryView = billingSummary as typeof billingSummary & {
-    currentPlan?: { status?: string | null; period?: 'month' | 'annual' | null }
-    delegatedBudget?: DelegatedBudgetSummary
-  }
-  const currentPlan = billingSummaryView.currentPlan
-  const delegatedBudget = billingSummaryView.delegatedBudget
-  const hasActiveDelegatedBudget = delegatedBudget?.status === 'active'
   const githubReposQueryKey = [
     'github',
     'recent-repos',
@@ -176,19 +130,8 @@ function DashboardRoute() {
   const isRefreshingGithubRepos = githubReposQuery.isFetching
   const githubAlertMessage = githubPickerError ?? githubReposError
   const selectedPreset = getOpenCodeAgentPreset(agentPresetId)
-  const selectedModelOption = getOpenCodeModelOption(agentModelOptionId)
   const selectedLaunchPriceUsdCents =
     pricingCatalog.launchPricesUsdCentsByAgentPreset[agentPresetId] ?? 0
-
-  useEffect(() => {
-    if (hasAutoSyncedBilling.current) {
-      return
-    }
-
-    hasAutoSyncedBilling.current = true
-
-    void syncBillingState(false)
-  }, [])
 
   async function refreshDashboard() {
     await Promise.all([
@@ -214,49 +157,6 @@ function DashboardRoute() {
     })
 
     void refreshDashboard()
-  }
-
-  async function syncBillingState(showFeedback: boolean) {
-    setIsBillingSyncing(true)
-
-    if (showFeedback) {
-      setBillingError(null)
-      setBillingSuccess(null)
-    }
-
-    try {
-      const result = await syncCurrentClerkBillingState()
-      await refreshDashboard()
-
-      if (!showFeedback) {
-        return
-      }
-
-      if (!result.synced) {
-        setBillingSuccess(
-          result.reason === 'billing_disabled'
-            ? 'Clerk Billing is disabled in this Clerk environment.'
-            : 'No active Clerk billing subscription was found to sync.',
-        )
-        return
-      }
-
-      setBillingSuccess(
-        result.grantApplied
-          ? 'Clerk billing state refreshed and new plan credits were granted.'
-          : 'Clerk billing state refreshed.',
-      )
-    } catch (error) {
-      if (showFeedback) {
-        setBillingError(
-          error instanceof Error
-            ? error.message
-            : 'Could not sync Clerk billing state.',
-        )
-      }
-    } finally {
-      setIsBillingSyncing(false)
-    }
   }
 
   async function loadGithubBranchesForRepo(repo: GithubRepoOption) {
@@ -325,25 +225,13 @@ function DashboardRoute() {
     event.preventDefault()
     setFormError(null)
     setActionError(null)
-
-    if (paymentMethod === 'delegated_budget' && !hasActiveDelegatedBudget) {
-      setFormError(
-        'Set up an active delegated budget before using that payment rail.',
-      )
-      document.getElementById('delegated-budget')?.scrollIntoView({
-        behavior: 'smooth',
-        block: 'start',
-      })
-      return
-    }
-
     setIsCreating(true)
 
     try {
       const payload = {
         agentPresetId,
-        agentProvider: selectedModelOption.provider,
-        agentModel: selectedModelOption.model,
+        agentProvider: selectedPreset.provider,
+        agentModel: selectedPreset.model,
         initialPrompt,
         repoUrl,
         branch,
@@ -393,18 +281,6 @@ function DashboardRoute() {
     setBusySandboxId(sandboxId)
     setActionError(null)
 
-    if (paymentMethod === 'delegated_budget' && !hasActiveDelegatedBudget) {
-      setActionError(
-        'Set up an active delegated budget before using that payment rail.',
-      )
-      document.getElementById('delegated-budget')?.scrollIntoView({
-        behavior: 'smooth',
-        block: 'start',
-      })
-      setBusySandboxId(null)
-      return
-    }
-
     try {
       const result = isX402SandboxPaymentMethod(paymentMethod)
         ? await postJsonWithX402Payment<X402SandboxActionResult>({
@@ -437,8 +313,7 @@ function DashboardRoute() {
                   Launch Workspace
                 </CardTitle>
                 <p className="mt-3 max-w-2xl text-sm text-muted-foreground">
-                  Choose an agent preset, a repository, and the payment rail for
-                  the launch. The same rail is used for dashboard restarts.
+                  Choose an agent preset and a repository to launch a workspace.
                 </p>
               </div>
               <Badge
@@ -451,87 +326,10 @@ function DashboardRoute() {
           </CardHeader>
 
           <CardContent>
-            {billingError ? (
-              <Alert
-                variant="destructive"
-                className="mb-4 border-2 border-foreground"
-              >
-                <AlertDescription>{billingError}</AlertDescription>
-              </Alert>
-            ) : null}
-
-            {billingSuccess ? (
-              <Alert className="mb-4 border-2 border-foreground">
-                <AlertDescription>{billingSuccess}</AlertDescription>
-              </Alert>
-            ) : null}
-
-            {isBillingSyncing ? (
-              <p className="mb-4 text-sm text-muted-foreground">
-                Syncing billing state...
-              </p>
-            ) : null}
-
-            <div className="mb-4 grid gap-4 xl:grid-cols-[1.2fr_0.8fr]">
-              <div className="grid gap-3 md:grid-cols-3">
-                <div className="border-2 border-foreground bg-muted p-3">
-                  <p className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">
-                    Wallet available
-                  </p>
-                  <p className="mt-1 text-lg font-black">
-                    {formatUsdCents(billingSummary.wallet.availableUsdCents)}
-                  </p>
-                </div>
-                <div className="border-2 border-foreground bg-muted p-3">
-                  <p className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">
-                    Wallet held
-                  </p>
-                  <p className="mt-1 text-lg font-black">
-                    {formatUsdCents(billingSummary.wallet.heldUsdCents)}
-                  </p>
-                </div>
-                <div className="border-2 border-foreground bg-muted p-3">
-                  <p className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">
-                    Subscription
-                  </p>
-                  <p className="mt-1 text-sm font-black uppercase">
-                    {formatBillingPlanStatus(currentPlan?.status)}
-                  </p>
-                  <p className="mt-1 text-xs text-muted-foreground">
-                    {formatBillingPlanPeriod(
-                      currentPlan?.period ?? undefined,
-                    ) ?? 'No billing period'}
-                  </p>
-                </div>
-              </div>
-
-              <DelegatedBudgetManager
-                id="delegated-budget"
-                summary={delegatedBudget}
-                record={delegatedBudgetRecord}
-                environment={pricingCatalog.environment}
-                onUpdated={refreshDashboard}
-                onSelectRail={() => {
-                  setPaymentMethod('delegated_budget')
-                }}
-              />
-            </div>
-
             <form
               className="flex flex-col gap-4"
               onSubmit={handleCreateSandbox}
             >
-              <PaymentMethodToggle
-                value={paymentMethod}
-                onChange={(nextValue) => {
-                  setFormError(null)
-                  setPaymentMethod(nextValue)
-                }}
-                creditsDescription={`Spend ${formatUsdCents(selectedLaunchPriceUsdCents)} from your shared wallet.`}
-                x402Description={`Settle ${formatUsdCents(selectedLaunchPriceUsdCents)} directly on ${billingSummary.wallet.fundingNetwork}.`}
-                delegatedBudgetDescription={`Spend ${formatUsdCents(selectedLaunchPriceUsdCents)} from an active MetaMask delegated budget.`}
-              />
-
               <div
                 role="radiogroup"
                 aria-label="OpenCode preset agent"
@@ -553,9 +351,6 @@ function DashboardRoute() {
                       onClick={() => {
                         setFormError(null)
                         setAgentPresetId(preset.id)
-                        setAgentModelOptionId(
-                          preset.defaultModelOptionId as OpenCodeModelOptionId,
-                        )
                       }}
                       className={cn(
                         'flex flex-col gap-3 rounded-lg border-2 border-foreground p-4 text-left shadow-[3px_3px_0_var(--foreground)] transition-all focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50',
@@ -586,69 +381,19 @@ function DashboardRoute() {
               </div>
 
               <div className="flex flex-col gap-2">
-                <div className="flex flex-col gap-1">
-                  <p className="text-[10px] font-black uppercase tracking-widest">
-                    Model Provider
-                  </p>
-                  <p className="text-sm text-muted-foreground">
-                    BuddyPie stores the selected provider and model on the
-                    sandbox record in Convex and reuses them on restart.
-                    Selecting a preset applies its recommended default model,
-                    which you can override here.
-                  </p>
-                </div>
-
-                <div
-                  role="radiogroup"
-                  aria-label="Model provider and model"
-                  className="grid gap-3 md:grid-cols-3"
-                >
-                  {openCodeModelOptions.map((option) => {
-                    const isSelected = option.id === agentModelOptionId
-
-                    return (
-                      <button
-                        key={option.id}
-                        type="button"
-                        role="radio"
-                        aria-checked={isSelected}
-                        onClick={() => {
-                          setFormError(null)
-                          setAgentModelOptionId(option.id)
-                        }}
-                        className={cn(
-                          'flex flex-col gap-3 rounded-lg border-2 border-foreground p-4 text-left shadow-[3px_3px_0_var(--foreground)] transition-all focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50',
-                          isSelected
-                            ? 'translate-x-[2px] translate-y-[2px] bg-accent shadow-none'
-                            : 'bg-background hover:translate-x-[1px] hover:translate-y-[1px] hover:shadow-none',
-                        )}
-                      >
-                        <div className="flex flex-col gap-2">
-                          <div className="flex flex-wrap items-center gap-2">
-                            <Badge
-                              variant={isSelected ? 'secondary' : 'outline'}
-                              className="border-2 border-foreground font-bold uppercase tracking-widest"
-                            >
-                              {option.providerLabel}
-                            </Badge>
-                            <Badge
-                              variant="outline"
-                              className="border-2 border-foreground font-bold uppercase tracking-widest"
-                            >
-                              {option.modelLabel}
-                            </Badge>
-                          </div>
-                          <p className="text-xs text-muted-foreground">
-                            {option.description}
-                          </p>
-                          <p className="font-mono text-xs text-muted-foreground">
-                            {option.provider}/{option.model}
-                          </p>
-                        </div>
-                      </button>
-                    )
-                  })}
-                </div>
+                <p className="text-[10px] font-black uppercase tracking-widest">
+                  Payment Rail
+                </p>
+                <PaymentMethodToggle
+                  value={paymentMethod}
+                  onChange={(nextValue) => {
+                    setFormError(null)
+                    setPaymentMethod(nextValue)
+                  }}
+                  creditsDescription={`Spend ${formatUsdCents(selectedLaunchPriceUsdCents)} from your shared wallet.`}
+                  x402Description={`Settle ${formatUsdCents(selectedLaunchPriceUsdCents)} directly on ${billingSummary.wallet.fundingNetwork}.`}
+                  delegatedBudgetDescription={`Spend ${formatUsdCents(selectedLaunchPriceUsdCents)} from your delegated budget.`}
+                />
               </div>
 
               <div className="flex flex-col gap-2">
@@ -804,17 +549,11 @@ function DashboardRoute() {
                   className="h-10 border-2 border-foreground bg-foreground px-6 text-sm font-black uppercase tracking-wider text-background shadow-[4px_4px_0_var(--accent)] transition-all hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-none"
                 >
                   {isCreating
-                    ? isX402SandboxPaymentMethod(paymentMethod)
-                      ? 'Waiting for wallet...'
-                      : paymentMethod === 'delegated_budget'
-                        ? 'Settling budget...'
-                        : 'Launching...'
+                    ? 'Launching...'
                     : `Create sandbox with ${formatSandboxPaymentMethod(paymentMethod)} →`}
                 </Button>
                 <p className="text-xs text-muted-foreground">
                   Launch cost: {formatUsdCents(selectedLaunchPriceUsdCents)}.
-                  Runtime actions on the workspace page use the same shared
-                  wallet, delegated budget, or x402 direct flow.
                 </p>
               </div>
             </form>
@@ -837,8 +576,7 @@ function DashboardRoute() {
               {sandboxes.length}
             </p>
             <p className="text-xs text-muted-foreground">
-              Restarts use {formatSandboxPaymentMethod(paymentMethod)} from this
-              page.
+              Manage payment rails in your profile.
             </p>
           </div>
         </div>

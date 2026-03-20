@@ -984,12 +984,15 @@ export async function revokeDelegatedBudget(
   args: {
     userId: Id<'users'>
     delegatedBudgetId: Id<'delegatedBudgets'>
-    revokeTxHash: string
+    revokeTxHash?: string
+    revocationMode: 'onchain' | 'local_retire'
     remainingAmountUsdCents: number
     lastRevokedAt?: number
   },
 ) {
-  requireNonEmptyText(args.revokeTxHash, 'Revoke transaction hash')
+  if (args.revocationMode === 'onchain') {
+    requireNonEmptyText(args.revokeTxHash ?? '', 'Revoke transaction hash')
+  }
 
   const budget = await ctx.db.get(args.delegatedBudgetId)
 
@@ -1003,7 +1006,8 @@ export async function revokeDelegatedBudget(
     status: 'revoked',
     remainingAmountUsdCents: args.remainingAmountUsdCents,
     lastRevokedAt: revokedAt,
-    revokeTxHash: args.revokeTxHash,
+    ...(args.revokeTxHash ? { revokeTxHash: args.revokeTxHash } : {}),
+    revocationMode: args.revocationMode,
     updatedAt: revokedAt,
   })
 

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { convexQuery } from '@convex-dev/react-query'
 import { createFileRoute, Link, useNavigate } from '@tanstack/react-router'
-import { useQueryClient, useSuspenseQuery } from '@tanstack/react-query'
+import { useQuery, useQueryClient, useSuspenseQuery } from '@tanstack/react-query'
 import { api } from 'convex/_generated/api'
 import type { Id } from 'convex/_generated/dataModel'
 import { DelegatedBudgetManager } from '~/components/delegated-budget-manager'
@@ -12,6 +12,7 @@ import { Badge } from '~/components/ui/badge'
 import { Button } from '~/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '~/components/ui/card'
 import { StatusPill } from '~/components/status-pill'
+import { readCurrentDelegatedBudgetHealth } from '~/features/billing/server'
 import {
   createTerminalAccess,
   deleteSandbox,
@@ -212,7 +213,19 @@ function SandboxDetailRoute() {
     delegatedBudget?: DelegatedBudgetSummary
   }
   const delegatedBudget = billingSummaryView.delegatedBudget
-  const hasActiveDelegatedBudget = delegatedBudget?.status === 'active'
+  const delegatedBudgetHealthQuery = useQuery({
+    queryKey: [
+      'billing',
+      'delegated-budget-health',
+      delegatedBudgetRecord?._id ?? 'none',
+    ],
+    queryFn: () => readCurrentDelegatedBudgetHealth(),
+    staleTime: 15_000,
+  })
+  const delegatedBudgetHealth = delegatedBudgetHealthQuery.data
+  const hasActiveDelegatedBudget =
+    delegatedBudget?.status === 'active' &&
+    delegatedBudgetHealth?.health === 'usable'
   const pendingPaymentMethod =
     sandbox?.pendingPaymentMethod as SandboxPaymentMethod | undefined
 
@@ -280,11 +293,20 @@ function SandboxDetailRoute() {
       queryClient.invalidateQueries({
         queryKey: convexQuery(api.billing.dashboardSummary, {}).queryKey,
       }),
+      queryClient.invalidateQueries({
+        queryKey: convexQuery(api.billing.currentDelegatedBudget, {}).queryKey,
+      }),
+      queryClient.invalidateQueries({
+        queryKey: ['billing', 'delegated-budget-health'],
+      }),
     ])
   }
 
   function blockDelegatedBudgetAction() {
-    setError('Set up an active delegated budget before using that payment rail.')
+    setError(
+      delegatedBudgetHealth?.message ??
+        'Set up a healthy delegated budget before using that payment rail.',
+    )
     document.getElementById('delegated-budget')?.scrollIntoView({
       behavior: 'smooth',
       block: 'start',
@@ -716,6 +738,134 @@ function SandboxDetailRoute() {
     )
   }
 
+  if (sandbox.status === 'creating') {
+    return (
+      <main className="flex flex-col gap-6">
+        <Card className="border-2 border-foreground shadow-[4px_4px_0_var(--foreground)]">
+          <CardHeader>
+            <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+              <div className="flex flex-col gap-3">
+                <Link
+                  to="/dashboard"
+                  className="text-xs font-black uppercase tracking-widest text-muted-foreground hover:text-foreground"
+                >
+                  ← Dashboard
+                </Link>
+                <div className="flex flex-wrap items-center gap-2">
+                  <StatusPill status={sandbox.status} />
+                  <Badge
+                    variant="outline"
+                    className="border-2 border-foreground font-bold uppercase tracking-widest"
+                  >
+                    {presetLabel}
+                  </Badge>
+                  <Badge
+                    variant="outline"
+                    className="border-2 border-foreground font-bold uppercase tracking-widest"
+                  >
+                    {formatSandboxPaymentMethod(paymentMethod)}
+                  </Badge>
+                </div>
+                <CardTitle className="text-3xl font-black uppercase sm:text-4xl">
+                  {sandbox.repoName}
+                </CardTitle>
+                <p className="break-all text-sm text-muted-foreground">
+                  {sandbox.repoUrl}
+                </p>
+              </div>
+
+              <div className="flex flex-wrap gap-3">
+                <Button
+                  variant="outline"
+                  onClick={handleRestart}
+                  disabled={isBusy}
+                  className="border-2 border-foreground text-sm font-bold uppercase shadow-[2px_2px_0_var(--foreground)] hover:translate-x-[1px] hover:translate-y-[1px] hover:shadow-none"
+                >
+                  Restart
+                </Button>
+                <Button
+                  variant="destructive"
+                  onClick={() => setShowDeleteModal(true)}
+                  disabled={isBusy}
+                  className="border-2 border-foreground text-sm font-bold uppercase shadow-[2px_2px_0_var(--foreground)] hover:translate-x-[1px] hover:translate-y-[1px] hover:shadow-none"
+                >
+                  Delete
+                </Button>
+              </div>
+            </div>
+          </CardHeader>
+
+          <CardContent>
+            {error ? (
+              <Alert
+                variant="destructive"
+                className="mb-4 border-2 border-foreground"
+              >
+                <AlertDescription>{error}</AlertDescription>
+              </Alert>
+            ) : null}
+
+            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+              <div className="border-2 border-foreground bg-muted p-3">
+                <p className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">
+                  Branch
+                </p>
+                <p className="mt-1 font-bold">
+                  {sandbox.repoBranch || 'default'}
+                </p>
+              </div>
+              <div className="border-2 border-foreground bg-muted p-3">
+                <p className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">
+                  Provider
+                </p>
+                <p className="mt-1 font-bold">{providerLabel}</p>
+              </div>
+              <div className="border-2 border-foreground bg-muted p-3">
+                <p className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">
+                  Model
+                </p>
+                <p className="mt-1 break-all font-bold">{modelLabel}</p>
+              </div>
+              <div className="border-2 border-foreground bg-muted p-3">
+                <p className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">
+                  Workspace
+                </p>
+                <p className="mt-1 break-all font-bold">
+                  {sandbox.workspacePath || 'Provisioning...'}
+                </p>
+              </div>
+            </div>
+
+            <div className="mt-6 flex min-h-[420px] flex-col items-center justify-center border-2 border-foreground bg-muted/40 px-6 py-12 text-center">
+              <div className="relative h-20 w-20">
+                <div className="absolute inset-0 animate-spin rounded-full border-4 border-foreground border-t-transparent" />
+                <div className="absolute inset-[18px] animate-pulse rounded-full bg-accent" />
+              </div>
+              <h3 className="mt-8 text-2xl font-black uppercase">
+                Preparing workspace...
+              </h3>
+              <p className="mt-4 max-w-md text-sm text-muted-foreground">
+                The sandbox is still provisioning. BuddyPie will keep the
+                workspace locked until OpenCode is reachable.
+              </p>
+              <p className="mt-2 max-w-md text-xs font-bold uppercase tracking-widest text-muted-foreground">
+                The embedded preview will appear automatically once the sandbox
+                is ready.
+              </p>
+            </div>
+          </CardContent>
+        </Card>
+
+        <DeleteSandboxModal
+          open={showDeleteModal}
+          onOpenChange={setShowDeleteModal}
+          onConfirm={handleDelete}
+          sandboxName={sandbox.repoName}
+        />
+      </main>
+    )
+  }
+
   return (
     <main className="flex flex-col gap-6">
       <Card className="border-2 border-foreground shadow-[4px_4px_0_var(--foreground)]">
@@ -824,14 +974,17 @@ function SandboxDetailRoute() {
               delegatedBudgetDescription={
                 hasActiveDelegatedBudget
                   ? 'Use an active MetaMask delegated budget for the same actions.'
-                  : 'Set up a MetaMask delegated budget before selecting this rail.'
+                  : delegatedBudgetHealth?.message ??
+                    'Set up a MetaMask delegated budget before selecting this rail.'
               }
+              delegatedBudgetDisabled={!hasActiveDelegatedBudget}
             />
 
             <DelegatedBudgetManager
               id="delegated-budget"
               summary={delegatedBudget}
               record={delegatedBudgetRecord}
+              health={delegatedBudgetHealth}
               environment={pricingCatalog.environment}
               onUpdated={refreshSandboxQueries}
               onSelectRail={() => {
