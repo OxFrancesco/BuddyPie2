@@ -1,0 +1,517 @@
+---
+title: API Reference
+description: Backend function signatures and usage
+icon: Code
+---
+
+## Overview
+
+BuddyPie uses Convex for backend functions. Functions are organized by domain in the `convex/` directory.
+
+## Sandbox Functions
+
+### Queries
+
+#### sandboxes.list
+
+List the current user's sandboxes.
+
+```ts
+import { api } from 'convex/_generated/api'
+
+const sandboxes = await convex.query(api.sandboxes.list, {})
+```
+
+**Returns:** Array of sandbox records, most recent first, limited to 25.
+
+#### sandboxes.get
+
+Get a specific sandbox by ID.
+
+```ts
+const sandbox = await convex.query(api.sandboxes.get, {
+  sandboxId: 'sandboxes_abc123'
+})
+```
+
+**Arguments:**
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| `sandboxId` | `Id<sandboxes>` | Yes | Sandbox ID |
+
+**Returns:** Sandbox record or null if not found/not owned.
+
+### Mutations
+
+#### sandboxes.createPending
+
+Create a sandbox in 'creating' status.
+
+```ts
+const sandbox = await convex.mutation(api.sandboxes.createPending, {
+  repoUrl: 'https://github.com/user/repo',
+  repoName: 'repo',
+  repoProvider: 'github',
+  agentPresetId: 'general-engineer',
+  agentLabel: 'General Engineer',
+  agentProvider: 'openrouter',
+  agentModel: 'minimax/minimax-m2.7',
+  paymentMethod: 'credits',
+})
+```
+
+**Arguments:**
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| `repoUrl` | string | Yes | Repository URL |
+| `repoName` | string | Yes | Repository name |
+| `repoBranch` | string | No | Branch name |
+| `repoProvider` | 'github' \| 'git' | Yes | Provider type |
+| `agentPresetId` | string | Yes | Preset ID |
+| `agentLabel` | string | Yes | Preset label |
+| `agentProvider` | string | Yes | AI provider |
+| `agentModel` | string | Yes | AI model |
+| `initialPrompt` | string | No | Kickoff prompt |
+| `paymentMethod` | 'credits' \| 'x402' \| 'delegated_budget' | Yes | Payment method |
+
+**Returns:** Created sandbox record.
+
+#### sandboxes.markReady
+
+Mark a sandbox as ready after launch completes.
+
+```ts
+const sandbox = await convex.mutation(api.sandboxes.markReady, {
+  sandboxId: 'sandboxes_abc123',
+  daytonaSandboxId: 'daytona-xyz789',
+  previewUrl: 'https://3000-xyz.daytonaproxy01.net',
+  workspacePath: '/home/daytona/repo',
+  opencodeSessionId: 'session-123',
+})
+```
+
+**Arguments:**
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| `sandboxId` | `Id&lt;sandboxes&gt;` | Yes | Sandbox ID |
+| `daytonaSandboxId` | string | Yes | Daytona sandbox ID |
+| `previewUrl` | string | Yes | Preview URL |
+| `previewUrlPattern` | string | No | URL pattern with {PORT} |
+| `workspacePath` | string | Yes | Workspace path |
+| `opencodeSessionId` | string | No | OpenCode session ID |
+
+**Returns:** Updated sandbox record.
+
+#### sandboxes.markFailed
+
+Mark a sandbox as failed.
+
+```ts
+const sandbox = await convex.mutation(api.sandboxes.markFailed, {
+  sandboxId: 'sandboxes_abc123',
+  errorMessage: 'Repository clone failed',
+})
+```
+
+**Arguments:**
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| `sandboxId` | `Id&lt;sandboxes&gt;` | Yes | Sandbox ID |
+| `errorMessage` | string | Yes | Error description |
+
+**Returns:** Updated sandbox record.
+
+#### sandboxes.remove
+
+Delete a sandbox record.
+
+```ts
+await convex.mutation(api.sandboxes.remove, {
+  sandboxId: 'sandboxes_abc123',
+})
+```
+
+**Arguments:**
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| `sandboxId` | `Id&lt;sandboxes&gt;` | Yes | Sandbox ID |
+
+**Returns:** null
+
+## Billing Functions
+
+### Queries
+
+#### billing.getWallet
+
+Get the user's credit wallet state.
+
+```ts
+const wallet = await convex.query(api.billing.getWallet, {
+  environment: 'production',
+})
+```
+
+**Arguments:**
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| `environment` | 'staging' \| 'production' | No | Environment (default: 'production') |
+
+**Returns:**
+```ts
+{
+  accountId: `Id&lt;creditAccounts&gt;` | null
+  currency: 'USD'
+  availableUsdCents: number
+  heldUsdCents: number
+  lifetimeCreditedUsdCents: number
+  lifetimeSpentUsdCents: number
+  fundingAsset: 'USDC'
+  fundingNetwork: 'base-sepolia' | 'base-mainnet'
+  environment: 'staging' | 'production'
+  chainId: number
+  x402Network: string
+}
+```
+
+#### billing.getSandboxCharges
+
+Get charges for a specific sandbox.
+
+```ts
+const charges = await convex.query(api.billing.getSandboxCharges, {
+  sandboxId: 'sandboxes_abc123',
+})
+```
+
+**Returns:** Array of billing charge records.
+
+#### billing.getDelegatedBudgetSummary
+
+Get delegated budget configurations.
+
+```ts
+const budgets = await convex.query(api.billing.getDelegatedBudgetSummary, {})
+```
+
+**Returns:** Array of delegated budget summaries.
+
+### Mutations
+
+#### billing.topUpWithX402
+
+Top up credits via x402 payment.
+
+```ts
+const result = await convex.mutation(api.billing.topUpWithX402, {
+  grossUsdCents: 1000,  // $10.00
+})
+```
+
+**Arguments:**
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| `grossUsdCents` | number | Yes | Amount in cents |
+
+**Returns:** Payment configuration for x402 flow.
+
+#### billing.createDelegatedBudget
+
+Create a delegated budget for onchain spending.
+
+```ts
+const budget = await convex.mutation(api.billing.createDelegatedBudget, {
+  budgetType: 'periodic',
+  interval: 'month',
+  configuredAmountUsdCents: 10000,  // $100.00/month
+  network: 'base-sepolia',
+})
+```
+
+**Arguments:**
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| `budgetType` | 'fixed' \| 'periodic' | Yes | Budget type |
+| `interval` | 'day' \| 'week' \| 'month' | No | Reset interval (periodic only) |
+| `configuredAmountUsdCents` | number | Yes | Budget limit |
+| `network` | 'base-sepolia' \| 'base-mainnet' | Yes | Network |
+
+**Returns:** Delegation payload for MetaMask signing.
+
+## User Functions
+
+### Queries
+
+#### user.getCurrent
+
+Get the current user record.
+
+```ts
+const user = await convex.query(api.user.getCurrent, {})
+```
+
+**Returns:** User record or null if not authenticated.
+
+### Mutations
+
+#### user.upsert
+
+Create or update user from Clerk authentication.
+
+```ts
+const user = await convex.mutation(api.user.upsert, {})
+```
+
+**Returns:** User record.
+
+## Server Functions
+
+These functions run on the server and are not directly callable from the client.
+
+### Daytona Operations
+
+Located in `src/lib/server/daytona.ts`:
+
+#### createOpenCodeSandbox
+
+Create a complete OpenCode sandbox.
+
+```ts
+import { createOpenCodeSandbox } from '~/lib/server/daytona'
+
+const result = await createOpenCodeSandbox({
+  repoUrl: 'https://github.com/user/repo',
+  branch: 'main',
+  agentPresetId: 'general-engineer',
+  agentProvider: 'openrouter',
+  agentModel: 'minimax/minimax-m2.7',
+  initialPrompt: 'Implement the feature',
+  githubToken: 'gho_xxx',
+})
+```
+
+**Arguments:**
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| `repoUrl` | string | Yes | Repository URL |
+| `branch` | string | No | Branch name |
+| `agentPresetId` | string | Yes | Preset ID |
+| `agentProvider` | string | No | Override provider |
+| `agentModel` | string | No | Override model |
+| `initialPrompt` | string | No | Kickoff prompt |
+| `githubToken` | string | No | GitHub OAuth token |
+
+**Returns:**
+```ts
+{
+  repoName: string
+  repoProvider: 'github' | 'git'
+  branch?: string
+  workspacePath: string
+  previewUrl: string
+  previewUrlPattern: string
+  daytonaSandboxId: string
+  opencodeSessionId: string
+}
+```
+
+#### deleteOpenCodeSandbox
+
+Delete a Daytona sandbox.
+
+```ts
+import { deleteOpenCodeSandbox } from '~/lib/server/daytona'
+
+await deleteOpenCodeSandbox('daytona-sandbox-id')
+```
+
+#### ensureSandboxAppPreviewServer
+
+Start an app preview server.
+
+```ts
+import { ensureSandboxAppPreviewServer } from '~/lib/server/daytona'
+
+const result = await ensureSandboxAppPreviewServer({
+  daytonaSandboxId: 'daytona-sandbox-id',
+  workspacePath: '/home/daytona/repo',
+  port: 3000,
+})
+```
+
+**Returns:**
+```ts
+{
+  status: 'already-running' | 'started'
+  port: number
+  previewUrl: string
+}
+```
+
+#### getSandboxAppPreviewLogTail
+
+Get preview server logs.
+
+```ts
+import { getSandboxAppPreviewLogTail } from '~/lib/server/daytona'
+
+const result = await getSandboxAppPreviewLogTail({
+  daytonaSandboxId: 'daytona-sandbox-id',
+  workspacePath: '/home/daytona/repo',
+  port: 3000,
+  lines: 50,
+})
+```
+
+**Returns:**
+```ts
+{
+  port: number
+  output: string
+  logPath: string
+}
+```
+
+#### createSandboxSshAccessCommand
+
+Generate SSH access command.
+
+```ts
+import { createSandboxSshAccessCommand } from '~/lib/server/daytona'
+
+const result = await createSandboxSshAccessCommand({
+  daytonaSandboxId: 'daytona-sandbox-id',
+  expiresInMinutes: 60,
+})
+```
+
+**Returns:**
+```ts
+{
+  sshCommand: string
+  expiresAt: number
+}
+```
+
+## Preset Utilities
+
+Located in `src/lib/opencode/presets.ts`:
+
+### getOpenCodeAgentPreset
+
+Get preset by ID with validation.
+
+```ts
+import { getOpenCodeAgentPreset } from '~/lib/opencode/presets'
+
+const preset = getOpenCodeAgentPreset('general-engineer')
+```
+
+**Throws:** Error if preset ID is invalid.
+
+### resolveOpenCodeModelOption
+
+Resolve model option from provider/model inputs.
+
+```ts
+import { resolveOpenCodeModelOption } from '~/lib/opencode/presets'
+
+const option = resolveOpenCodeModelOption({
+  provider: 'openrouter',
+  model: 'minimax/minimax-m2.7',
+  fallbackProvider: 'venice',
+  fallbackModel: 'zai-org-glm-5',
+})
+```
+
+### getOpenCodeModelOptionByProviderAndModel
+
+Find model option by provider and model.
+
+```ts
+import { getOpenCodeModelOptionByProviderAndModel } from '~/lib/opencode/presets'
+
+const option = getOpenCodeModelOptionByProviderAndModel(
+  'openrouter',
+  'minimax/minimax-m2.7'
+)
+```
+
+## Sandbox Utilities
+
+Located in `src/lib/sandboxes.ts`:
+
+### normalizeSandboxInput
+
+Validate and normalize sandbox creation input.
+
+```ts
+import { normalizeSandboxInput } from '~/lib/sandboxes'
+
+const normalized = normalizeSandboxInput({
+  repoUrl: 'https://github.com/user/repo',
+  branch: 'main',
+  agentPresetId: 'general-engineer',
+  agentProvider: 'openrouter',
+  agentModel: 'minimax/minimax-m2.7',
+  initialPrompt: 'Build the feature',
+  paymentMethod: 'credits',
+})
+```
+
+### getWorkspacePath
+
+Get the workspace path for a repository.
+
+```ts
+import { getWorkspacePath } from '~/lib/sandboxes'
+
+const path = getWorkspacePath('my-repo')
+// '/home/daytona/my-repo'
+```
+
+### isGitHubRepo
+
+Check if a URL is a GitHub repository.
+
+```ts
+import { isGitHubRepo } from '~/lib/sandboxes'
+
+isGitHubRepo('https://github.com/user/repo')  // true
+isGitHubRepo('https://gitlab.com/user/repo')  // false
+```
+
+## Error Handling
+
+### ConvexError
+
+Backend errors use ConvexError:
+
+```ts
+import { ConvexError } from 'convex/values'
+
+throw new ConvexError('Sandbox not found.')
+```
+
+### Client Handling
+
+```ts
+try {
+  await convex.mutation(api.sandboxes.createPending, args)
+} catch (error) {
+  if (error instanceof ConvexError) {
+    console.error(error.data)  // Error message
+  }
+}
+```
+
+## Next Steps
+
+<Cards>
+  <Card title="Data Model" href="/docs/data-model">
+    Database schema details.
+  </Card>
+  <Card title="Architecture" href="/docs/architecture">
+    System component interactions.
+  </Card>
+</Cards>

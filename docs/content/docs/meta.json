@@ -1,0 +1,19 @@
+{
+  "title": "Documentation",
+  "pages": [
+    "index",
+    "getting-started",
+    "--- Architecture ---",
+    "architecture",
+    "data-model",
+    "--- Configuration ---",
+    "environment",
+    "presets",
+    "--- Development ---",
+    "development",
+    "api-reference",
+    "--- Billing ---",
+    "billing",
+    "contracts"
+  ]
+}

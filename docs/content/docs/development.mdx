@@ -1,0 +1,341 @@
+---
+title: Development Workflow
+description: Local development, testing, and deployment procedures
+icon: Terminal
+---
+
+## Development Server
+
+### Starting the Application
+
+```bash
+# Install dependencies
+bun install
+
+# Push Convex schema (first time only)
+bunx convex dev --once
+
+# Start development server
+bun run dev
+```
+
+The `dev` script runs:
+1. Convex schema sync (once)
+2. Vite dev server on port 3000
+3. Convex dev sync (hot reload)
+
+### Available Scripts
+
+| Command | Description |
+|---------|-------------|
+| `bun run dev` | Start development environment |
+| `bun run dev:web` | Start Vite dev server only |
+| `bun run dev:convex` | Start Convex dev sync only |
+| `bun run build` | Build for production |
+| `bun run test` | Run test suite |
+| `bun run lint` | Run linter |
+| `bun run format` | Format code with Prettier |
+
+## Project Structure
+
+```
+buddypie2/
+├── convex/              # Convex backend
+│   ├── schema.ts        # Database schema
+│   ├── sandboxes.ts     # Sandbox mutations/queries
+│   ├── billing.ts       # Billing functions
+│   ├── user.ts          # User management
+│   ├── http.ts          # HTTP actions
+│   └── crons.ts         # Scheduled jobs
+├── src/
+│   ├── components/      # React components
+│   ├── features/        # Feature modules
+│   ├── lib/
+│   │   ├── opencode/    # Preset configuration
+│   │   ├── server/      # Server-side logic
+│   │   └── billing/     # Billing utilities
+│   ├── routes/          # TanStack Router pages
+│   └── styles/          # CSS styles
+├── contracts/           # Solidity contracts
+├── public/              # Static assets
+└── docs/                # Documentation site
+```
+
+## Testing
+
+### Running Tests
+
+```bash
+# Run all tests
+bun test
+
+# Run specific test file
+bun test tests/sandbox.test.ts
+
+# Run with coverage
+bun test --coverage
+```
+
+### Test Structure
+
+Tests are located in the `tests/` directory:
+
+```
+tests/
+├── convex/              # Convex function tests
+├── lib/                 # Utility tests
+└── integration/         # Integration tests
+```
+
+## Code Quality
+
+### Linting
+
+```bash
+# Run ESLint
+bun run lint
+
+# Fix auto-fixable issues
+bunx eslint . --fix
+```
+
+### Formatting
+
+```bash
+# Format all files
+bun run format
+
+# Check formatting
+bunx prettier --check .
+```
+
+### TypeScript
+
+```bash
+# Type check
+bunx tsc --noEmit
+```
+
+## Convex Development
+
+### Schema Changes
+
+1. Modify `convex/schema.ts`
+2. Run `bunx convex dev` to sync
+3. Schema changes are applied immediately
+
+### Function Development
+
+Convex functions are defined with validators:
+
+```ts
+import { mutation } from './_generated/server'
+import { v } from 'convex/values'
+
+export const myMutation = mutation({
+  args: {
+    name: v.string(),
+    count: v.optional(v.number()),
+  },
+  returns: v.object({
+    success: v.boolean(),
+  }),
+  handler: async (ctx, args) => {
+    // Implementation
+    return { success: true }
+  },
+})
+```
+
+### Debugging
+
+Use Convex dashboard for:
+- Function logs
+- Query performance
+- Database inspection
+- Real-time sync status
+
+## Smart Contract Development
+
+### Foundry Setup
+
+```bash
+# Install Foundry (if not installed)
+curl -L https://foundry.paradigm.xyz | bash
+foundryup
+```
+
+### Compilation
+
+```bash
+# Compile contracts
+forge build
+
+# Run tests
+forge test
+```
+
+### Deployment
+
+Base Sepolia:
+
+```bash
+forge script contracts/script/DeployDelegatedBudgetBaseSepolia.s.sol:DeployDelegatedBudgetBaseSepolia \
+  --rpc-url https://sepolia.base.org \
+  --broadcast
+```
+
+Base Mainnet:
+
+```bash
+forge script contracts/script/DeployDelegatedBudgetBaseMainnet.s.sol:DeployDelegatedBudgetBaseMainnet \
+  --rpc-url https://mainnet.base.org \
+  --broadcast
+```
+
+### Verification
+
+Add verification flags for BaseScan:
+
+```bash
+--verify --etherscan-api-key "$ETHERSCAN_API_KEY"
+```
+
+## Environment Management
+
+### Multiple Environments
+
+Use different `.env` files:
+
+```bash
+.env.local      # Local development
+.env.staging    # Staging environment
+.env.production # Production (use Convex env vars)
+```
+
+### Convex Environments
+
+```bash
+# Preview deployment
+bunx convex deploy --preview
+
+# Production deployment
+bunx convex deploy
+```
+
+### Environment Variables
+
+Set production variables in Convex dashboard:
+1. Navigate to Settings > Environment Variables
+2. Add each variable
+3. Deploy to apply
+
+## Deployment
+
+### Build Process
+
+```bash
+# Build for production
+bun run build
+```
+
+Output structure:
+```
+.output/
+├── server/
+│   └── index.mjs    # Server entry point
+└── public/          # Static assets
+```
+
+### Deployment Checklist
+
+1. Set all production environment variables
+2. Deploy Convex functions: `bunx convex deploy`
+3. Build the application: `bun run build`
+4. Deploy `.output/` to your hosting provider
+
+### Health Checks
+
+Verify deployment:
+
+1. Authentication flow works
+2. Sandbox creation completes
+3. Billing operations function
+4. OpenCode sessions start
+
+## Debugging
+
+### Common Issues
+
+<Accordions>
+  <Accordion id="convex-sync-error" title="Convex sync errors">
+    
+    Check that your `VITE_CONVEX_URL` is correct and the deployment is active.
+    
+    Run `bunx convex dev --once` to force a sync.
+    
+  </Accordion>
+  
+  <Accordion id="auth-redirect-loop" title="Authentication redirect loop">
+    
+    Verify Clerk configuration:
+    - Correct redirect URLs
+    - JWT template matches Convex auth config
+    - Domain configuration is correct
+    
+  </Accordion>
+  
+  <Accordion id="build-errors" title="Build fails with type errors">
+    
+    Run `bunx tsc --noEmit` to see all type errors.
+    
+    Ensure all dependencies are installed: `bun install`.
+    
+  </Accordion>
+</Accordions>
+
+### Logs
+
+- **Frontend logs**: Browser console
+- **Convex logs**: Convex dashboard
+- **Daytona logs**: Daytona dashboard
+- **OpenCode logs**: Sandbox `.buddypie/logs/` directory
+
+## Contributing
+
+### Branch Strategy
+
+- `main` - Production releases
+- `develop` - Integration branch
+- `feature/*` - Feature branches
+- `fix/*` - Bug fix branches
+
+### Commit Guidelines
+
+Follow conventional commits:
+
+```
+feat: add new preset for security auditing
+fix: resolve sandbox creation timeout
+docs: update getting started guide
+chore: upgrade dependencies
+```
+
+### Pull Request Process
+
+1. Create feature branch
+2. Make changes with tests
+3. Run lint and test
+4. Submit PR with description
+5. Address review feedback
+
+## Next Steps
+
+<Cards>
+  <Card title="API Reference" href="/docs/api-reference">
+    Backend function documentation.
+  </Card>
+  <Card title="Architecture" href="/docs/architecture">
+    System design details.
+  </Card>
+</Cards>

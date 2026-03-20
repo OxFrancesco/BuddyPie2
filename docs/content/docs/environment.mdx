@@ -1,0 +1,249 @@
+---
+title: Environment Configuration
+description: Environment variables and deployment configuration
+icon: Settings
+---
+
+## Environment Variables
+
+BuddyPie requires several environment variables for authentication, database, and AI provider integration.
+
+### Required Variables
+
+| Variable | Location | Description |
+|----------|----------|-------------|
+| `CLERK_PUBLISHABLE_KEY` | `.env.local` | Frontend Clerk public key |
+| `CLERK_SECRET_KEY` | `.env.local` | Backend Clerk secret |
+| `CLERK_JWT_ISSUER_DOMAIN` | `.env.local` | Clerk JWT issuer URL |
+| `VITE_CONVEX_URL` | `.env.local` | Convex deployment URL |
+| `DAYTONA_API_KEY` | `.env.local` | Daytona API key |
+
+### Optional Variables
+
+| Variable | Location | Default | Description |
+|----------|----------|---------|-------------|
+| `DAYTONA_API_URL` | `.env.local` | `https://app.daytona.io/api` | Daytona API endpoint |
+| `CONVEX_SITE_URL` | `.env.local` | Auto-detected | Convex HTTP actions URL |
+| `OPENROUTER_API_KEY` | `.env.local` | None | OpenRouter API key |
+| `VENICE_API_KEY` | `.env.local` | None | Venice AI API key |
+
+### Convex Environment Variables
+
+Set these in the Convex dashboard under Settings > Environment Variables:
+
+| Variable | Description |
+|----------|-------------|
+| `X402_PAY_TO_ADDRESS` | Wallet address receiving x402 payments |
+| `X402_EIP712_TOKEN_NAME` | USDC token name (default: `USDC`) |
+| `X402_EIP712_TOKEN_VERSION` | USDC token version (default: `2`) |
+
+## Configuration Files
+
+### Application Configuration
+
+| File | Purpose |
+|------|---------|
+| `package.json` | Dependencies and scripts |
+| `tsconfig.json` | TypeScript configuration |
+| `vite.config.ts` | Vite build configuration |
+| `convex/tsconfig.json` | Convex TypeScript config |
+
+### Convex Configuration
+
+| File | Purpose |
+|------|---------|
+| `convex/schema.ts` | Database schema definition |
+| `convex/auth.config.ts` | Authentication providers |
+| `convex/http.ts` | HTTP actions entry point |
+| `convex/crons.ts` | Scheduled job definitions |
+
+### Foundry Configuration (Contracts)
+
+| File | Purpose |
+|------|---------|
+| `foundry.toml` | Solidity compiler settings |
+| `contracts/` | Smart contract source files |
+
+## Clerk Setup
+
+### Application Configuration
+
+1. Create a Clerk application at [clerk.com](https://clerk.com)
+2. Enable authentication methods (Email, Google, GitHub, etc.)
+3. Configure redirect URLs for your environment
+
+### JWT Template for Convex
+
+Create a JWT template named `convex`:
+
+```json
+{
+  "audience": ["convex"],
+  "issuer": "https://your-app.clerk.accounts.dev",
+  "subject": "{{user.id}}",
+  "claims": {
+    "email": "{{user.primary_email_address}}",
+    "name": "{{user.first_name}} {{user.last_name}}"
+  }
+}
+```
+
+### OAuth Scopes (GitHub)
+
+For private repository access:
+
+1. Enable GitHub OAuth in Clerk
+2. Request `repo` scope for full repository access
+3. Users must grant access during sign-in
+
+## Daytona Configuration
+
+### API Key
+
+Generate an API key from the Daytona dashboard:
+
+1. Sign in to [daytona.io](https://daytona.io)
+2. Navigate to API Keys
+3. Create a new key with appropriate scopes
+
+### Sandbox Settings
+
+Sandbox creation parameters:
+
+```ts
+{
+  public: true,              // Public preview URLs
+  autoStopInterval: 30,      // Auto-stop after 30 minutes idle
+}
+```
+
+### Preview URL Pattern
+
+```
+https://{PORT}-{sandbox-id}.daytonaproxy01.net
+```
+
+## Model Provider Setup
+
+### OpenRouter
+
+1. Sign up at [openrouter.ai](https://openrouter.ai)
+2. Generate an API key
+3. Add to `.env.local` as `OPENROUTER_API_KEY`
+
+Supported models:
+
+| Model ID | Description |
+|----------|-------------|
+| `minimax/minimax-m2.7` | Default for general and frontend presets |
+
+### Venice AI
+
+1. Sign up at [venice.ai](https://venice.ai)
+2. Generate an API key
+3. Add to `.env.local` as `VENICE_API_KEY`
+
+Supported models:
+
+| Model ID | Description |
+|----------|-------------|
+| `openai-gpt-53-codex` | Coding-focused model |
+| `claude-sonnet-4-6` | Large context model |
+| `zai-org-glm-5` | Default for docs preset |
+
+### Environment Fallbacks
+
+The system supports key aliases for flexibility:
+
+```ts
+VENICE_API_KEY -> VENICE_INFERENCE_KEY (fallback)
+ZAI_API_KEY -> ZHIPU_API_KEY (fallback)
+```
+
+## Deployment Configuration
+
+### Production Environment
+
+For production deployment:
+
+1. Set `NODE_ENV=production`
+2. Use production Clerk keys (pk_live_*)
+3. Use production Convex deployment
+4. Configure production Daytona workspace
+
+### Convex Deployment
+
+```bash
+# Deploy to production
+bunx convex deploy
+
+# Set production variables
+bunx convex env set X402_PAY_TO_ADDRESS 0x...
+```
+
+### Build Configuration
+
+```bash
+# Build the application
+bun run build
+
+# Output in .output/
+# - .output/server/index.mjs - Server entry
+# - .output/public/ - Static assets
+```
+
+## Network Configuration
+
+### Base Networks
+
+BuddyPie supports Base for blockchain payments:
+
+| Network | Chain ID | RPC URL |
+|---------|----------|---------|
+| Base Sepolia | 84532 | `https://sepolia.base.org` |
+| Base Mainnet | 8453 | `https://mainnet.base.org` |
+
+### USDC Addresses
+
+| Network | USDC Address |
+|---------|--------------|
+| Base Sepolia | `0x036CbD53842c5426634e7929541eC2318f3dCF7e` |
+| Base Mainnet | `0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913` |
+
+## Security Considerations
+
+### Secrets Management
+
+- Never commit `.env.local` to version control
+- Use environment-specific secrets in production
+- Rotate API keys periodically
+
+### Key Scopes
+
+| Key | Required Scope |
+|-----|----------------|
+| `CLERK_SECRET_KEY` | Full Clerk API access |
+| `DAYTONA_API_KEY` | Sandbox management |
+| `OPENROUTER_API_KEY` | Model inference |
+| `VENICE_API_KEY` | Model inference |
+
+### User Data
+
+- User PII stored in Convex
+- GitHub tokens stored via Clerk OAuth
+- Wallet addresses stored for billing
+
+<Callout type="warn">
+The `CLERK_SECRET_KEY` has full access to your Clerk application. Protect it carefully.
+</Callout>
+
+## Next Steps
+
+<Cards>
+  <Card title="Presets Configuration" href="/docs/presets">
+    Configure AI models and workflow presets.
+  </Card>
+  <Card title="Billing Setup" href="/docs/billing">
+    Configure payment methods and credit accounts.
+  </Card>
+</Cards>

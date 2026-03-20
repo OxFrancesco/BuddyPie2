@@ -1,0 +1,283 @@
+---
+title: Smart Contracts
+description: Solidity contracts for delegated budget settlement
+icon: FileCode
+---
+
+## Overview
+
+BuddyPie uses Solidity contracts for onchain delegated budget settlement. These contracts enable users to set spending limits that BuddyPie can settle against.
+
+## BuddyPieDelegatedBudgetSettlement
+
+The main contract handles delegated budget management and USDC settlement.
+
+### Contract Address
+
+| Network | Address |
+|---------|---------|
+| Base Sepolia | Deploy via script |
+| Base Mainnet | Deploy via script |
+
+### Key Features
+
+- Smart account-only settlement authority
+- Periodic and fixed budget types
+- USDC transfer to treasury
+- Budget revocation support
+
+## Deployment
+
+### Prerequisites
+
+1. Install Foundry:
+```bash
+curl -L https://foundry.paradigm.xyz | bash
+foundryup
+```
+
+2. Set environment variables:
+```bash
+export DEPLOYER_PRIVATE_KEY=0x...
+export BUDDYPIE_TREASURY=0x...
+export BUDDYPIE_USDC=0x036CbD53842c5426634e7929541eC2318f3dCF7e
+```
+
+### Deploy to Base Sepolia
+
+```bash
+forge script contracts/script/DeployDelegatedBudgetBaseSepolia.s.sol:DeployDelegatedBudgetBaseSepolia \
+  --rpc-url https://sepolia.base.org \
+  --broadcast
+```
+
+### Deploy to Base Mainnet
+
+```bash
+forge script contracts/script/DeployDelegatedBudgetBaseMainnet.s.sol:DeployDelegatedBudgetBaseMainnet \
+  --rpc-url https://mainnet.base.org \
+  --broadcast
+```
+
+### Verification
+
+Add verification flags for BaseScan:
+
+```bash
+--verify --etherscan-api-key "$ETHERSCAN_API_KEY"
+```
+
+## Contract Functions
+
+### Creating Budgets
+
+Budgets are created offchain and registered onchain:
+
+1. Backend generates delegation payload
+2. User signs with MetaMask
+3. Smart account approves delegation
+4. Contract records budget
+
+### Settling Budgets
+
+Only the delegator smart account can trigger settlements:
+
+```solidity
+function settle(
+    address delegator,
+    uint256 budgetId,
+    uint256 amount,
+    bytes calldata signature
+) external;
+```
+
+### Revoking Budgets
+
+Users can revoke budgets:
+
+```solidity
+function revokeBudget(uint256 budgetId) external;
+```
+
+## Budget Types
+
+### Fixed Budget
+
+One-time spending limit that doesn't reset.
+
+```solidity
+struct FixedBudget {
+    uint256 amount;
+    uint256 spent;
+    address owner;
+    address delegate;
+}
+```
+
+### Periodic Budget
+
+Resets on interval (day/week/month).
+
+```solidity
+struct PeriodicBudget {
+    uint256 amount;
+    uint256 spent;
+    uint256 periodStart;
+    uint256 periodDuration;
+    address owner;
+    address delegate;
+}
+```
+
+## Known Addresses
+
+### RPC URLs
+
+| Network | RPC URL |
+|---------|---------|
+| Base Sepolia | `https://sepolia.base.org` |
+| Base Mainnet | `https://mainnet.base.org` |
+
+### USDC Addresses
+
+| Network | USDC Address |
+|---------|--------------|
+| Base Sepolia | `0x036CbD53842c5426634e7929541eC2318f3dCF7e` |
+| Base Mainnet | `0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913` |
+
+## Integration
+
+### Backend Settlement
+
+The BuddyPie backend triggers settlements:
+
+1. Sandbox operation completes
+2. Charge amount calculated
+3. Settlement transaction prepared
+4. Transaction submitted to contract
+5. USDC transferred to treasury
+
+### MetaMask Delegation Toolkit
+
+BuddyPie uses `@metamask/delegation-toolkit` for:
+
+- Creating delegation payloads
+- Signing EIP-712 messages
+- Managing smart account permissions
+
+### EIP-712 Configuration
+
+For custom USDC tokens, configure in Convex environment:
+
+```bash
+X402_EIP712_TOKEN_NAME=USDC
+X402_EIP712_TOKEN_VERSION=2
+```
+
+## Security Model
+
+### Authority Verification
+
+The contract treats the smart account as the only onchain authority:
+
+- Backend delegate address stored for audit
+- Direct settlement from EOA rejected
+- All settlements must come through smart account
+
+### Signature Verification
+
+Settlements require valid signatures:
+
+1. Backend signs settlement intent
+2. Signature verified against delegate
+3. Smart account confirms authorization
+
+### Budget Enforcement
+
+- Cannot exceed configured amount
+- Periodic budgets reset automatically
+- Revoked budgets reject all settlements
+
+## Testing
+
+### Run Contract Tests
+
+```bash
+forge test
+```
+
+### Test Coverage
+
+```bash
+forge coverage
+```
+
+### Gas Reports
+
+```bash
+forge test --gas-report
+```
+
+## Contract Structure
+
+```
+contracts/
+├── src/
+│   └── BuddyPieDelegatedBudgetSettlement.sol
+├── script/
+│   ├── DeployDelegatedBudgetBaseSepolia.s.sol
+│   └── DeployDelegatedBudgetBaseMainnet.s.sol
+├── test/
+│   └── BuddyPieDelegatedBudgetSettlement.t.sol
+└── AUDIT_NOTES.md
+```
+
+## Audit Notes
+
+See `contracts/AUDIT_NOTES.md` for security considerations:
+
+- Smart account authority model
+- Periodic budget interval handling
+- Signature replay protection
+
+## Troubleshooting
+
+<Accordions>
+  <Accordion id="deployment-failed" title="Deployment failed">
+    
+    Check that:
+    - `DEPLOYER_PRIVATE_KEY` has sufficient ETH
+    - RPC URL is correct and accessible
+    - Network is not congested
+    
+  </Accordion>
+  
+  <Accordion id="settlement-rejected" title="Settlement transaction rejected">
+    
+    Verify:
+    - Budget is active (not revoked/expired)
+    - Amount doesn't exceed remaining budget
+    - Signature is valid and not expired
+    
+  </Accordion>
+  
+  <Accordion id="usdc-transfer-failed" title="USDC transfer failed">
+    
+    Ensure:
+    - User has approved the contract
+    - User has sufficient USDC balance
+    - Correct USDC address for network
+    
+  </Accordion>
+</Accordions>
+
+## Next Steps
+
+<Cards>
+  <Card title="Billing" href="/docs/billing">
+    Credit system and payment integration.
+  </Card>
+  <Card title="Environment" href="/docs/environment">
+    Network and deployment configuration.
+  </Card>
+</Cards>

@@ -1,6 +1,13 @@
 node_modules
 
-docs
+# Docs build artifacts (track source)
+docs/node_modules
+docs/.output
+docs/.nitro
+docs/.tanstack
+docs/.vercel
+docs/.source
+docs/bun.lock
 metamask-docs
 
 !.env
@@ -31,3 +38,4 @@ metamask-docs
 /playwright/.cache/
 
 app.config.timestamp_*.js
+sources/

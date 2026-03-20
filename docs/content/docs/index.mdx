@@ -1,0 +1,134 @@
+---
+title: BuddyPie Documentation
+description: Launch AI-powered development sandboxes with OpenCode integration
+icon: Rocket
+---
+
+import { CpuIcon, BoxIcon, WalletIcon, CodeIcon, TerminalIcon, SettingsIcon } from 'lucide-react'
+
+## What is BuddyPie?
+
+BuddyPie launches Daytona sandboxes, clones a repository, and boots an embedded OpenCode workspace for task-specific AI sessions. It combines infrastructure orchestration with configurable AI workflows to automate development tasks.
+
+<Cards>
+
+<Card icon={<CpuIcon className="text-purple-300" />} title="Daytona Sandboxes" href="/docs/architecture#daytona-integration">
+
+Ephemeral development environments with Git repository cloning and network preview URLs.
+
+</Card>
+
+<Card icon={<BoxIcon className="text-blue-300" />} title="OpenCode Integration" href="/docs/presets">
+
+Configurable AI presets with skills, instructions, and workspace bootstrapping.
+
+</Card>
+
+<Card icon={<WalletIcon />} title="Billing & Payments" href="/docs/billing">
+
+Credit-based billing with USDC top-ups, subscription grants, and delegated budgets.
+
+</Card>
+
+<Card icon={<CodeIcon />} title="Smart Contracts" href="/docs/contracts">
+
+Solidity contracts for delegated budget settlement on Base.
+
+</Card>
+
+</Cards>
+
+## Quick Start
+
+### Prerequisites
+
+- Node.js 22 or later
+- Bun runtime
+- A Convex deployment
+- A Daytona API key
+- Clerk application for authentication
+
+### Environment Setup
+
+Create a `.env.local` file in the project root:
+
+```bash
+# Required
+CLERK_PUBLISHABLE_KEY=pk_test_...
+CLERK_SECRET_KEY=sk_test_...
+CLERK_JWT_ISSUER_DOMAIN=https://your-clerk-app.clerk.accounts.dev
+VITE_CONVEX_URL=https://your-deployment.convex.cloud
+DAYTONA_API_KEY=your-daytona-api-key
+
+# Optional
+DAYTONA_API_URL=https://app.daytona.io/api
+CONVEX_SITE_URL=https://your-deployment.convex.site
+OPENROUTER_API_KEY=sk-or-...
+VENICE_API_KEY=your-venice-key
+```
+
+### Development Server
+
+```bash
+# Install dependencies
+bun install
+
+# Start Convex sync and dev server
+bun run dev
+```
+
+This runs Convex schema sync once, then starts both the web server and Convex dev sync in parallel.
+
+<Callout title="First Run">
+On first run, you need to run `bunx convex dev --once` separately to push the schema before the dev server can function properly.
+</Callout>
+
+## Workflow Presets
+
+BuddyPie manages OpenCode presets for different work types. Each preset configures AI behavior, skills, and workspace setup.
+
+| Preset | Default Model | Use Case |
+|--------|---------------|----------|
+| General Engineer | OpenRouter / MiniMax M2.7 | Full-stack product work, refactors, features |
+| Frontend Builder | OpenRouter / MiniMax M2.7 | UI components, styling, accessibility |
+| Docs Writer | Venice / GLM 5 | Documentation, guides, README files |
+
+<Cards>
+  <Card title="Preset Configuration" href="/docs/presets">
+    Configure AI models, skills, and workflow instructions.
+  </Card>
+  <Card title="Model Providers" href="/docs/presets#model-providers">
+    OpenRouter and Venice integration details.
+  </Card>
+</Cards>
+
+## Architecture Overview
+
+BuddyPie is built on three main components:
+
+1. **Frontend** - TanStack Start React app with Clerk authentication
+2. **Backend** - Convex for real-time data, billing, and orchestration
+3. **Infrastructure** - Daytona for sandbox provisioning, OpenCode for AI
+
+<Files>
+  <Folder name="src" defaultOpen>
+    <Folder name="lib">
+      <File name="opencode/presets.ts" />
+      <File name="server/daytona.ts" />
+      <File name="sandboxes.ts" />
+    </Folder>
+    <Folder name="routes" />
+  </Folder>
+  <Folder name="convex">
+    <File name="schema.ts" />
+    <File name="sandboxes.ts" />
+    <File name="billing.ts" />
+  </Folder>
+  <Folder name="contracts">
+    <File name="src/BuddyPieDelegatedBudgetSettlement.sol" />
+  </Folder>
+</Files>
+
+<Card title="Full Architecture" href="/docs/architecture" icon={<SettingsIcon />}>
+Deep dive into the system design, data flow, and component interactions.
+</Card>

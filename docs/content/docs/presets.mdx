@@ -1,0 +1,314 @@
+---
+title: OpenCode Presets
+description: Configure AI behavior with workflow presets and model providers
+icon: Brain
+---
+
+## Overview
+
+BuddyPie manages OpenCode presets to configure AI behavior for different work types. Each preset defines:
+
+- Agent instructions and prompt
+- Available skills
+- Model provider and model
+- Workspace bootstrap behavior
+
+## Available Presets
+
+| Preset ID | Label | Default Model | Purpose |
+|-----------|-------|---------------|---------|
+| `general-engineer` | General Engineer | OpenRouter / MiniMax M2.7 | Full-stack development |
+| `frontend-builder` | Frontend Builder | OpenRouter / MiniMax M2.7 | UI and styling work |
+| `docs-writer` | Docs Writer | Venice / GLM 5 | Documentation |
+
+### General Engineer
+
+Balanced repo analysis and implementation for full-stack product work.
+
+**Configuration:**
+- Provider: `openrouter`
+- Model: `minimax/minimax-m2.7`
+- Required env: `OPENROUTER_API_KEY`
+
+**Skills:**
+| Skill ID | Purpose |
+|----------|---------|
+| `buddypie-general-architecture` | Map architecture before cross-cutting changes |
+| `buddypie-general-release-check` | Verification and handoff notes |
+
+**Starter Prompt:**
+> Inspect this repository, identify the files and systems relevant to the requested task, and start with the smallest high-confidence plan before editing. Then implement the change, verify the behavior you touched, and summarize the result with any remaining risks or follow-up work.
+
+### Frontend Builder
+
+UI-focused preset for React, styling, accessibility, and polish work.
+
+**Configuration:**
+- Provider: `openrouter`
+- Model: `minimax/minimax-m2.7`
+- Required env: `OPENROUTER_API_KEY`
+
+**Skills:**
+| Skill ID | Purpose |
+|----------|---------|
+| `buddypie-frontend-component-craft` | Component architecture and state |
+| `buddypie-frontend-ui-polish` | Responsive behavior and accessibility |
+
+**Starter Prompt:**
+> Audit the relevant UI surfaces in this repository, identify the files that control the experience, and propose the smallest high-confidence frontend plan before editing.
+
+### Docs Writer
+
+Documentation-focused preset for guides, READMEs, and onboarding content.
+
+**Configuration:**
+- Provider: `venice`
+- Model: `zai-org-glm-5`
+- Required env: `VENICE_API_KEY`
+
+**Skills:**
+| Skill ID | Purpose |
+|----------|---------|
+| `buddypie-docs-structure` | Plan documentation structure |
+| `buddypie-docs-qa` | Verify docs against code |
+
+**Workspace Bootstrap:**
+- Clones Fumadocs reference to `sources/fumadocs`
+- Scaffolds Fumadocs app in `docs/` or `docs-site/`
+- Uses `tanstack-start` template with Bun
+
+**Starter Prompt:**
+> Review the current repository, identify the documentation gaps that matter most, and build a complete Fumadocs docs pass for this project.
+
+## Model Providers
+
+### OpenRouter
+
+OpenRouter provides access to multiple AI models through a unified API.
+
+**Configuration:**
+- Provider ID: `openrouter`
+- Required env: `OPENROUTER_API_KEY`
+
+**Available Models:**
+
+| Model ID | Label | Description |
+|----------|-------|-------------|
+| `minimax/minimax-m2.7` | MiniMax M2.7 | Balanced general work |
+
+**Model ID Format:**
+OpenRouter models use the format `{provider}/{model}` in the OpenCode config.
+
+### Venice AI
+
+Venice provides uncensored AI models with privacy focus.
+
+**Configuration:**
+- Provider ID: `venice`
+- Required env: `VENICE_API_KEY`
+
+**Available Models:**
+
+| Model ID | Label | Description |
+|----------|-------|-------------|
+| `openai-gpt-53-codex` | GPT-5.3 Codex | Coding and tool use |
+| `claude-sonnet-4-6` | Claude Sonnet 4.6 | Large context for analysis |
+| `zai-org-glm-5` | GLM 5 | Docs workflow default |
+
+**Model ID Format:**
+Venice models use the format `venice/{model}` in the OpenCode config.
+
+## Configuration Reference
+
+### Preset Definition
+
+```ts
+type OpenCodeAgentPresetDefinition = {
+  id: string                    // Unique identifier
+  label: string                 // Display name
+  description: string           // Short description
+  defaultModelOptionId: string  // Default model option
+  provider: string              // AI provider
+  model: string                 // Model identifier
+  requiredEnv: string[]         // Required environment variables
+  agentPrompt: string           // Base agent prompt
+  instructionsMd: string        // Instructions file content
+  starterPrompt: string         // Default kickoff prompt
+  starterPromptPlaceholder: string  // Input placeholder text
+  skills: OpenCodeManagedSkill[]    // Available skills
+  mcp: Record<string, OpenCodeManagedMcp>  // MCP servers
+  workspaceBootstrap?: OpenCodeWorkspaceBootstrap  // Bootstrap config
+}
+```
+
+### Model Option Definition
+
+```ts
+type OpenCodeModelOptionDefinition = {
+  id: string              // Unique identifier
+  label: string           // Display name
+  description: string     // Short description
+  provider: string        // Provider ID
+  providerLabel: string   // Provider display name
+  model: string           // Model identifier
+  modelLabel: string      // Model display name
+  requiredEnv: string[]   // Required environment variables
+}
+```
+
+### Skill Definition
+
+```ts
+type OpenCodeManagedSkill = {
+  id: string              // Skill identifier
+  name: string            // Skill name
+  description: string     // When to use
+  content: string         // Skill markdown content
+  permission?: 'allow' | 'ask' | 'deny'  // Execution permission
+}
+```
+
+### Workspace Bootstrap
+
+```ts
+type OpenCodeDocsWorkspaceBootstrap = {
+  kind: 'fumadocs-docs-app'
+  sourceRepoUrl: string      // Reference repository URL
+  sourceRepoBranch: string   // Git branch
+  sourceRepoPath: string     // Target path in workspace
+  docsTemplate: 'tanstack-start'  // Fumadocs template
+  preferredDocsPath: string  // Preferred docs directory
+  fallbackDocsPath: string   // Fallback docs directory
+  packageManager: 'bun'      // Package manager
+}
+```
+
+## Adding New Presets
+
+To add a new preset:
+
+1. Add the model option to `openCodeModelOptionMap`
+2. Add the preset definition to `openCodePresetMap`
+3. Update `models.md`
+4. Update `README.md`
+5. Update `AGENTS.md`
+
+### Example: Adding a Security Audit Preset
+
+```ts
+// In src/lib/opencode/presets.ts
+
+const openCodePresetMap = {
+  // ... existing presets
+  'security-auditor': {
+    id: 'security-auditor',
+    label: 'Security Auditor',
+    description: 'Security-focused analysis and vulnerability detection.',
+    defaultModelOptionId: 'venice-claude-sonnet-4.6',
+    provider: 'venice',
+    model: 'claude-sonnet-4-6',
+    requiredEnv: ['VENICE_API_KEY'],
+    agentPrompt: 'Act as a security specialist...',
+    instructionsMd: `...`,
+    starterPrompt: 'Audit this repository for security vulnerabilities...',
+    starterPromptPlaceholder: 'Describe the security concern or code to audit.',
+    skills: [
+      {
+        id: 'buddypie-security-scan',
+        name: 'buddypie-security-scan',
+        description: 'Scan for common vulnerability patterns.',
+        content: `...`,
+      },
+    ],
+    mcp: {},
+  },
+}
+```
+
+## Runtime Behavior
+
+### Model Resolution
+
+When a sandbox launches:
+
+1. Check if `agentProvider` and `agentModel` are specified
+2. Validate against supported model options
+3. Fall back to preset default if not specified
+4. Inject required environment variables
+
+### Config Generation
+
+The `buildOpenCodeConfig` function generates:
+
+```json
+{
+  "$schema": "https://opencode.ai/config.json",
+  "model": "openrouter/minimax/minimax-m2.7",
+  "default_agent": "general-engineer",
+  "instructions": [".buddypie/opencode/AGENTS.md"],
+  "permission": {
+    "skill": {
+      "*": "deny",
+      "buddypie-general-architecture": "allow",
+      "buddypie-general-release-check": "allow"
+    }
+  },
+  "agent": {
+    "general-engineer": {
+      "description": "Balanced repo analysis...",
+      "mode": "primary",
+      "model": "openrouter/minimax/minimax-m2.7",
+      "prompt": "You are running in a Daytona sandbox..."
+    }
+  }
+}
+```
+
+### Permission Model
+
+Skills are permission-controlled:
+
+- `allow` - Execute without asking
+- `ask` - Request user confirmation
+- `deny` - Block execution
+
+All unspecified skills default to `deny`.
+
+## Troubleshooting
+
+<Accordions>
+  <Accordion id="model-not-found" title="Model not supported error">
+    
+    Ensure the model ID matches exactly. OpenRouter uses `{provider}/{model}` format, while Venice uses just the model ID.
+    
+    Check that the required environment variable is set.
+    
+  </Accordion>
+  
+  <Accordion id="preset-load-error" title="Preset fails to load">
+    
+    Verify the preset ID is valid. Check `isOpenCodeAgentPresetId()` for validation.
+    
+    Ensure all required environment variables are configured.
+    
+  </Accordion>
+  
+  <Accordion id="skill-permission-denied" title="Skill permission denied">
+    
+    The skill must be listed in the preset's `skills` array with permission `allow` or `ask`.
+    
+    Skills not listed default to `deny`.
+    
+  </Accordion>
+</Accordions>
+
+## Next Steps
+
+<Cards>
+  <Card title="Architecture" href="/docs/architecture">
+    How presets integrate with the system.
+  </Card>
+  <Card title="Development" href="/docs/development">
+    Local development workflow.
+  </Card>
+</Cards>
