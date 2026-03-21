@@ -1,103 +1,138 @@
 # BuddyPie
 
-BuddyPie launches Daytona sandboxes, clones a repository, and boots an
-embedded OpenCode workspace for task-specific AI sessions.
+BuddyPie spins up cloud sandboxes, clones your repo, drops an AI coding agent inside, and lets you watch it work through a browser-based IDE. You pick a repo, choose a workflow preset, and BuddyPie handles the rest: provisioning the Daytona sandbox, checking out a dedicated branch, booting OpenCode, and seeding the first task.
 
-## Required Environment
+Three payment rails sit behind a single launch button. Pay with subscription credits, settle per-session with x402 micropayments on Base, or set up a delegated USDC budget through a Solidity contract so the backend can draw from an approved allowance without a wallet prompt every time.
 
-Add these values to your local `.env` before starting the app:
+## How it works
 
-- `CLERK_PUBLISHABLE_KEY`
-- `CLERK_SECRET_KEY`
-- `CLERK_JWT_ISSUER_DOMAIN`
-- `VITE_CONVEX_URL`
-- `DAYTONA_API_KEY`
+1. You sign in (Clerk), land on the dashboard, pick a GitHub repo and a workflow preset.
+2. BuddyPie creates a Daytona sandbox, clones the repo, checks out a `codex/...` working branch.
+3. The selected preset writes its agent prompt, instructions, and skills into the sandbox, then starts OpenCode's web UI.
+4. The agent begins working on whatever task you typed in, or falls back to the preset's built-in starter prompt.
+5. You watch, interact, or walk away. When the agent finishes, it pushes the branch so you can open a PR.
+
+## Stack
+
+| Layer | What |
+|---|---|
+| Frontend | React 19, TanStack Router + Start, Tailwind CSS 4, Radix UI, shadcn/ui |
+| Backend | Convex (realtime DB, mutations, queries, cron jobs, HTTP actions) |
+| Auth | Clerk (JWT-based, synced to Convex) |
+| Sandboxes | Daytona SDK |
+| AI agent | OpenCode (embedded web IDE + agent runtime) |
+| Payments | Clerk subscriptions, x402 micropayments (Base), delegated USDC budgets (MetaMask Delegation Toolkit) |
+| Contracts | Foundry, Solidity, deployed on Base Sepolia / Base Mainnet |
+| Docs site | Fumadocs (TanStack Start template) |
+
+## Workflow presets
+
+Each preset controls the agent's system prompt, managed instructions, injected skills, and workspace bootstrap behavior.
+
+- **general-engineer** -- Full-stack product work. Inspects the repo first, plans small, verifies before handoff. Default model: OpenRouter `minimax/minimax-m2.7`.
+- **frontend-builder** -- UI-focused. Prioritizes design-system consistency, responsive behavior, accessibility, and state coverage. Default model: OpenRouter `minimax/minimax-m2.7`.
+- **docs-writer** -- Documentation from code. Clones the Fumadocs reference repo, scaffolds a docs app, writes content anchored to actual source files, then typechecks and builds before handing off. Default model: Venice `minimax-m27`.
+
+Every preset injects a shared delivery workflow: use Bun, run the build and typecheck, fix what you broke, push the branch when GitHub auth is available.
+
+## Model options
+
+| Provider | Model | Dashboard ID |
+|---|---|---|
+| OpenRouter | MiniMax M2.7 | `openrouter-minimax-m2.7` |
+| Venice AI | GPT-5.3 Codex | `venice-gpt-5.3-codex` |
+| Venice AI | Claude Sonnet 4.6 | `venice-claude-sonnet-4.6` |
+| Venice AI | MiniMax M2.7 | `venice-minimax-m2.7` |
+
+The preset and model are independent choices. You can run the docs-writer preset on GPT-5.3 Codex if you want.
+
+## Billing
+
+BuddyPie tracks credits, holds, charges, and ledger entries in Convex. Three payment methods:
+
+- **Credits** -- Granted by Clerk subscription plans. Held at launch, captured or released on completion.
+- **x402** -- Per-request micropayment settled on Base using the x402 protocol. No prepaid balance needed.
+- **Delegated budget** -- You sign a MetaMask delegation that creates an onchain USDC budget. The `BuddyPieDelegatedBudgetSettlement` contract lets the backend settle charges against that budget without prompting your wallet each time. Fixed or periodic (daily/weekly/monthly) budgets supported.
+
+## Required environment
+
+```
+CLERK_PUBLISHABLE_KEY
+CLERK_SECRET_KEY
+CLERK_JWT_ISSUER_DOMAIN
+VITE_CONVEX_URL
+DAYTONA_API_KEY
+```
 
 Optional:
 
-- `DAYTONA_API_URL`
-- `CONVEX_SITE_URL` (explicit Convex HTTP actions URL, e.g. `https://<deployment>.convex.site`)
-- `OPENROUTER_API_KEY` for OpenRouter-backed model selections
-- `VENICE_API_KEY` for Venice-backed model selections
+```
+DAYTONA_API_URL
+CONVEX_SITE_URL
+OPENROUTER_API_KEY          # needed for OpenRouter model options
+VENICE_API_KEY              # needed for Venice model options
+X402_PAY_TO_ADDRESS         # Convex env, for x402 settlement
+X402_EIP712_TOKEN_NAME      # Convex env, if overriding USDC asset
+X402_EIP712_TOKEN_VERSION   # Convex env, if overriding USDC asset
+```
 
-For x402 settlement in Convex HTTP actions, configure `X402_PAY_TO_ADDRESS`
-in your Convex deployment environment.
-
-Wallet-signed top-ups require the user to connect a browser wallet on Base
-Sepolia and sign a USDC transfer transaction.
-
-If you override the USDC asset contract, also configure
-`X402_EIP712_TOKEN_NAME` and `X402_EIP712_TOKEN_VERSION` in Convex env so
-buyer payload signing has the correct token domain.
-
-Follow the Clerk + Convex auth guide at
-https://docs.convex.dev/auth/clerk and make sure `convex/auth.config.ts`
-uses the matching Clerk issuer domain.
+Follow the [Clerk + Convex auth guide](https://docs.convex.dev/auth/clerk) and make sure `convex/auth.config.ts` uses the matching Clerk issuer domain.
 
 ## Development
 
 ```bash
+bun install
 bunx convex dev --once
 bun run dev
 ```
 
-## OpenCode Presets And Models
+This starts the Vite dev server, Convex watcher, and the Fumadocs dev server concurrently.
 
-BuddyPie manages the OpenCode preset layer instead of leaving agent
-selection to OpenCode itself.
+## Contracts
 
-- Workflow presets live in `src/lib/opencode/presets.ts`.
-- Supported provider/model selections also live in
-  `src/lib/opencode/presets.ts` and are documented in `models.md`.
-- The dashboard lets you choose the workflow preset separately from the
-  provider/model option.
-- BuddyPie persists the selected `agentPresetId`, `agentProvider`, and
-  `agentModel` into the Convex `sandboxes` table and reuses the stored
-  provider/model on restart.
-- When provider or model options change, update `models.md`, `README.md`,
-  and `AGENTS.md` in the same change.
+The delegated budget settlement contract lives in `contracts/src/BuddyPieDelegatedBudgetSettlement.sol`. Deploy with Foundry:
 
-Current model selections:
+```bash
+# Base Sepolia
+forge script contracts/script/DeployDelegatedBudgetBaseSepolia.s.sol:DeployDelegatedBudgetBaseSepolia \
+  --rpc-url https://sepolia.base.org --broadcast
 
-- OpenRouter: `minimax/minimax-m2.7`
-- Venice: `openai-gpt-53-codex`
-- Venice: `claude-sonnet-4-6`
-- Venice: `minimax-m27`
+# Base Mainnet
+forge script contracts/script/DeployDelegatedBudgetBaseMainnet.s.sol:DeployDelegatedBudgetBaseMainnet \
+  --rpc-url https://mainnet.base.org --broadcast
+```
 
-Preset defaults:
+Add `--verify --etherscan-api-key "$ETHERSCAN_API_KEY"` for BaseScan verification.
 
-- `general-engineer`: OpenRouter `minimax/minimax-m2.7`
-- `frontend-builder`: OpenRouter `minimax/minimax-m2.7`
-- `docs-writer`: Venice `minimax-m27`
+## Project structure
 
-When a sandbox launches, BuddyPie writes the preset-specific OpenCode files
-inside the sandbox, starts `opencode web`, then seeds the first session with
-the selected kickoff task.
+```
+src/
+  components/       UI components (sandbox cards, billing, modals)
+  features/         Feature modules (billing, sandboxes)
+  lib/
+    opencode/       Preset definitions, model catalog
+    server/         Server-side Daytona, x402, delegated budget logic
+    billing/        Client-side billing utilities
+  routes/           TanStack Router pages (dashboard, profile, sandbox views)
+convex/
+  schema.ts         Full data model (users, sandboxes, billing, delegated budgets)
+  billing.ts        Credit holds, charges, subscriptions, delegated budget mutations
+  sandboxes.ts      Sandbox CRUD and lifecycle
+  http.ts           Convex HTTP actions (webhooks, x402)
+  crons.ts          Scheduled jobs (hold expiry, etc.)
+contracts/
+  src/              Solidity source
+  script/           Foundry deploy scripts
+  test/             Contract tests
+docs/               Fumadocs documentation site
+```
 
-Leaving the kickoff field blank uses the preset's built-in starter prompt.
-Every current preset, including `general-engineer`, now ships a non-empty
-starter prompt, and BuddyPie opens the seeded OpenCode session directly in
-the web UI instead of landing on the generic root view.
+## Changing providers or models
 
-Every preset also injects a shared delivery workflow into the managed agent
-instructions: use Bun for repo commands, run build and type validation before
-handoff, and push the current branch back to GitHub when sandbox auth is
-available so a PR can be opened from that branch.
-
-BuddyPie also clones the selected repository branch or the repo default branch,
-then immediately creates and checks out a dedicated `codex/...` working branch
-inside the sandbox before OpenCode starts. Agents should stay on that isolated
-working branch instead of switching back to the base branch.
-
-The `docs-writer` preset also performs a docs-specific workspace bootstrap
-before OpenCode starts:
-
-- clones `https://github.com/fuma-nama/fumadocs.git` into `sources/fumadocs`
-  on branch `main`
-- adds `sources/` to the target repository root `.gitignore`
-- scaffolds a Bun-based Fumadocs app with the `tanstack-start` template into
-  `docs/`, or `docs-site/` when `docs/` is already occupied by non-Fumadocs
-  content
-- appends the prepared workspace paths to the managed AGENTS instructions and
-  seeded kickoff prompt so the docs agent uses the product repo for project
-  truth and the Fumadocs repo for framework truth
+1. Update `src/lib/opencode/presets.ts`.
+2. Update `models.md`.
+3. Update this README.
+4. Update `AGENTS.md`.
+5. Verify the needed env vars are documented and available.
+6. Confirm launch and restart still preserve the intended provider/model in Convex.
