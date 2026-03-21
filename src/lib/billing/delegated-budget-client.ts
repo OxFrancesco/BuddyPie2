@@ -11,7 +11,6 @@ import {
   contractEnumToDelegatedBudgetType,
   delegatedBudgetContractAbi,
   delegatedBudgetIntervalToContractEnum,
-  delegatedBudgetIntervalToDurationSeconds,
   delegatedBudgetTypeToContractEnum,
   erc20ApprovalAbi,
   erc20BalanceAbi,
@@ -1158,31 +1157,15 @@ export async function deployMetaMaskSmartAccountIfNeeded(args: {
   return txHash
 }
 
-function buildDelegatedBudgetCaveats(args: {
-  tokenAddress: Address
+export function buildDelegatedBudgetCaveats(args: {
   backendDelegateAddress: Address
-  budgetType: DelegatedBudgetType
-  amountUsdCents: number
-  interval?: DelegatedBudgetInterval | null
   nowSeconds: number
   delegationExpiresAtSeconds: number
 }) {
   return [
-    args.budgetType === 'periodic'
-      ? {
-          type: 'erc20PeriodTransfer' as const,
-          tokenAddress: args.tokenAddress,
-          periodAmount: usdCentsToUsdcAtomic(args.amountUsdCents),
-          periodDuration: delegatedBudgetIntervalToDurationSeconds(
-            args.interval ?? 'month',
-          ),
-          startDate: args.nowSeconds,
-        }
-      : {
-          type: 'erc20TransferAmount' as const,
-          tokenAddress: args.tokenAddress,
-          maxAmount: usdCentsToUsdcAtomic(args.amountUsdCents),
-        },
+    // Budget amount and period limits are enforced by BuddyPie's settlement
+    // contract. ERC20 transfer caveats only understand direct token-transfer
+    // executions, so they break this settlement-contract flow.
     {
       type: 'redeemer' as const,
       redeemers: [args.backendDelegateAddress],
@@ -1381,11 +1364,7 @@ export async function createDelegatedBudgetWithWallet(
       from: delegatorSmartAccount,
       to: backendDelegateAddress,
       caveats: buildDelegatedBudgetCaveats({
-        tokenAddress,
         backendDelegateAddress,
-        budgetType: args.budgetType,
-        amountUsdCents: args.amountUsdCents,
-        interval: args.interval,
         nowSeconds,
         delegationExpiresAtSeconds: Math.floor(delegationExpiresAt / 1000),
       }),

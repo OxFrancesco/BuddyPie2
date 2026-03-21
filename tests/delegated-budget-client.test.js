@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test'
 import {
   assertSufficientSmartAccountUsdcBalance,
   assertSufficientSmartAccountNativeBalance,
+  buildDelegatedBudgetCaveats,
   deployMetaMaskSmartAccountIfNeeded,
   topUpSmartAccountGasIfNeeded,
   topUpSmartAccountUsdcIfNeeded,
@@ -134,6 +135,32 @@ describe('assertSufficientSmartAccountUsdcBalance', () => {
         pollIntervalMs: 1,
       }),
     ).resolves.toBe(20_000_000n)
+  })
+})
+
+describe('buildDelegatedBudgetCaveats', () => {
+  test('uses settlement-contract-safe caveats instead of ERC20 transfer enforcers', () => {
+    expect(
+      buildDelegatedBudgetCaveats({
+        backendDelegateAddress: '0x1111111111111111111111111111111111111111',
+        nowSeconds: 1_700_000_000,
+        delegationExpiresAtSeconds: 1_800_000_000,
+      }),
+    ).toEqual([
+      {
+        type: 'redeemer',
+        redeemers: ['0x1111111111111111111111111111111111111111'],
+      },
+      {
+        type: 'timestamp',
+        afterThreshold: 1_699_999_940,
+        beforeThreshold: 1_800_000_000,
+      },
+      {
+        type: 'valueLte',
+        maxValue: 0n,
+      },
+    ])
   })
 })
 

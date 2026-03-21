@@ -52,6 +52,7 @@ export type DelegatedBudgetHealthReason =
   | 'delegate_mismatch'
   | 'treasury_mismatch'
   | 'missing_treasury'
+  | 'legacy_transfer_caveat'
   | 'invalid_delegation'
   | 'unknown'
 
@@ -238,6 +239,8 @@ function buildDelegatedBudgetHealthMessage(
       return 'This delegated budget points at a different treasury than BuddyPie uses now. Reset and recreate it before using this payment rail.'
     case 'missing_treasury':
       return 'This delegated budget is missing its treasury target. Reset and recreate it before using this payment rail.'
+    case 'legacy_transfer_caveat':
+      return "This delegated budget was created with an older ERC20 transfer caveat that does not work with BuddyPie's settlement-contract flow. Reset and recreate it before using this payment rail."
     case 'invalid_delegation':
       return 'The stored delegated-budget signature no longer matches its delegation payload. Reset and recreate it before using this payment rail.'
     default:
@@ -330,6 +333,27 @@ function normalizeDelegationHash(args: {
   return computedHash
 }
 
+function usesLegacyDelegatedBudgetTransferCaveat(args: {
+  delegationJson: string
+  environment: ReturnType<typeof getDeleGatorEnvironment>
+}) {
+  const delegation = parseDelegation(args.delegationJson)
+  const legacyEnforcers = [
+    args.environment.caveatEnforcers.ERC20TransferAmountEnforcer,
+    args.environment.caveatEnforcers.ERC20PeriodTransferEnforcer,
+  ]
+    .filter(Boolean)
+    .map((value) => getAddress(value as Address))
+
+  return (delegation.caveats ?? []).some((caveat) => {
+    try {
+      return legacyEnforcers.includes(getAddress(caveat.enforcer as Address))
+    } catch {
+      return false
+    }
+  })
+}
+
 export function classifyDelegatedBudgetHealth(args: {
   budgetStatus?: DelegatedBudgetStatus
   delegationExpiresAt?: number
@@ -337,6 +361,7 @@ export function classifyDelegatedBudgetHealth(args: {
   treasuryMatchesEnvironment: boolean
   hasTreasuryAddress: boolean
   delegationHashMatches: boolean
+  delegationExecutionCompatible?: boolean
   delegatorSmartAccountDeployed: boolean
   onchainStatus?: DelegatedBudgetOnchainState['status'] | null
   now?: number
@@ -357,6 +382,13 @@ export function classifyDelegatedBudgetHealth(args: {
     return {
       health: 'needs_recreate',
       healthReason: 'missing_treasury',
+    }
+  }
+
+  if (args.delegationExecutionCompatible === false) {
+    return {
+      health: 'needs_recreate',
+      healthReason: 'legacy_transfer_caveat',
     }
   }
 
@@ -440,6 +472,14 @@ export async function readDelegatedBudgetHealth(
     normalizedTreasury !== null &&
     normalizedTreasury === getAddress(environmentConfig.treasuryAddress as Address)
   let delegationHashMatches = true
+  let delegationExecutionCompatible = true
+
+  try {
+    delegationExecutionCompatible = !usesLegacyDelegatedBudgetTransferCaveat({
+      delegationJson: budget.delegationJson,
+      environment: getDeleGatorEnvironment(resolveDelegatedBudgetChain().id),
+    })
+  } catch {}
 
   try {
     normalizeDelegationHash({
@@ -460,6 +500,7 @@ export async function readDelegatedBudgetHealth(
     treasuryMatchesEnvironment,
     hasTreasuryAddress: Boolean(normalizedTreasury),
     delegationHashMatches,
+    delegationExecutionCompatible,
     delegatorSmartAccountDeployed: deployed,
   })
 
@@ -480,6 +521,7 @@ export async function readDelegatedBudgetHealth(
       treasuryMatchesEnvironment,
       hasTreasuryAddress: Boolean(normalizedTreasury),
       delegationHashMatches,
+      delegationExecutionCompatible,
       delegatorSmartAccountDeployed: deployed,
       onchainStatus: onchainBudget.status,
     })
@@ -657,24 +699,43 @@ async function submitDelegatedBudgetSettlementLocally(args: {
     settlementId: args.settlementId,
   })
   const delegation = parseDelegation(args.delegationJson)
-  const txHash = await redeemDelegations(
-    walletClient as never,
-    publicClient as never,
-    environment.DelegationManager as Address,
-    [
-      {
-        permissionContext: [delegation],
-        executions: [
-          createExecution({
-            target: getAddress(args.settlementContract as Address),
-            callData,
-            value: 0n,
-          }),
-        ],
-        mode: ExecutionMode.SingleDefault,
-      },
-    ],
-  )
+  let txHash: Hex
+
+  try {
+    txHash = await redeemDelegations(
+      walletClient as never,
+      publicClient as never,
+      environment.DelegationManager as Address,
+      [
+        {
+          permissionContext: [delegation],
+          executions: [
+            createExecution({
+              target: getAddress(args.settlementContract as Address),
+              callData,
+              value: 0n,
+            }),
+          ],
+          mode: ExecutionMode.SingleDefault,
+        },
+      ],
+    )
+  } catch (error) {
+    const message =
+      error instanceof Error ? error.message : typeof error === 'string' ? error : ''
+
+    if (
+      /erc20transferamountenforcer:invalid-execution-length|erc20periodtransferenforcer:invalid-execution-length/i.test(
+        message,
+      )
+    ) {
+      throw new Error(
+        "This delegated budget was created with an older ERC20 transfer caveat and cannot settle sandbox charges through BuddyPie's settlement contract. Revoke it and create a new delegated budget.",
+      )
+    }
+
+    throw error
+  }
   const receipt = await publicClient.waitForTransactionReceipt({
     hash: txHash,
   })

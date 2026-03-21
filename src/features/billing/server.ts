@@ -122,6 +122,7 @@ export type DelegatedBudgetHealthResult = {
     | 'delegate_mismatch'
     | 'treasury_mismatch'
     | 'missing_treasury'
+    | 'legacy_transfer_caveat'
     | 'invalid_delegation'
     | 'unknown'
   message: string

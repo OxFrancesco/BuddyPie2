@@ -34,6 +34,24 @@ describe('classifyDelegatedBudgetHealth', () => {
     })
   })
 
+  test('marks legacy transfer-caveat budgets as needing recreation', () => {
+    expect(
+      classifyDelegatedBudgetHealth({
+        budgetStatus: 'active',
+        delegateMatchesEnvironment: true,
+        treasuryMatchesEnvironment: true,
+        hasTreasuryAddress: true,
+        delegationHashMatches: true,
+        delegationExecutionCompatible: false,
+        delegatorSmartAccountDeployed: true,
+        onchainStatus: 'active',
+      }),
+    ).toEqual({
+      health: 'needs_recreate',
+      healthReason: 'legacy_transfer_caveat',
+    })
+  })
+
   test('keeps deployed active budgets usable', () => {
     expect(
       classifyDelegatedBudgetHealth({
