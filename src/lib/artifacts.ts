@@ -5,13 +5,35 @@ export const SANDBOX_ARTIFACT_MANIFEST_VERSION = 1 as const
 export const SANDBOX_ARTIFACT_MANIFEST_KIND = 'json-render' as const
 export const SANDBOX_ARTIFACT_RELATIVE_PATH = '.buddypie/artifacts/current.json'
 
+const sandboxArtifactElementSchema = z.object({
+  type: z.string().trim().min(1),
+  props: z.record(z.string(), z.any()).default({}),
+  children: z.array(z.string()).default([]),
+  visible: z.any().optional(),
+})
+
+const sandboxArtifactSpecSchema = z
+  .object({
+    root: z.string().trim().min(1),
+    elements: z.record(z.string(), sandboxArtifactElementSchema),
+    state: z.record(z.string(), z.any()).optional(),
+  })
+  .superRefine((spec, ctx) => {
+    if (!(spec.root in spec.elements)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: `spec.root must reference an element defined in spec.elements.`,
+      })
+    }
+  })
+
 export const sandboxArtifactManifestV1Schema = z.object({
   version: z.literal(SANDBOX_ARTIFACT_MANIFEST_VERSION),
   kind: z.literal(SANDBOX_ARTIFACT_MANIFEST_KIND),
   title: z.string().trim().min(1),
   summary: z.string().trim().min(1).optional(),
   generatedAt: z.string().trim().min(1),
-  spec: z.record(z.string(), z.any()),
+  spec: sandboxArtifactSpecSchema,
 })
 
 export type SandboxArtifactManifestV1 = z.infer<

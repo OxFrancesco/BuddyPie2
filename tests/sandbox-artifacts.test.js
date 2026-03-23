@@ -54,6 +54,24 @@ describe('parseSandboxArtifactManifest', () => {
     expect(result.error.length).toBeGreaterThan(0)
   })
 
+  test('returns invalid when spec is not a renderable json-render tree', () => {
+    const result = parseSandboxArtifactManifest({
+      manifestPath,
+      content: JSON.stringify({
+        version: 1,
+        kind: 'json-render',
+        title: 'Wallet Summary',
+        summary: 'A concise overview.',
+        generatedAt: '2026-03-23T10:20:00.000Z',
+        spec: {},
+      }),
+    })
+
+    expect(result.status).toBe('invalid')
+    expect(result.manifestPath).toBe(manifestPath)
+    expect(result.error.length).toBeGreaterThan(0)
+  })
+
   test('returns ready when the manifest matches the v1 contract', () => {
     const result = parseSandboxArtifactManifest({
       manifestPath,
@@ -96,6 +114,7 @@ describe('parseSandboxArtifactManifest', () => {
                 text: 'Wallet Summary',
                 level: 'h2',
               },
+              children: [],
             },
           },
         },
