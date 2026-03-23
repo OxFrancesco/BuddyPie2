@@ -32,7 +32,7 @@ Each preset controls the agent's system prompt, managed instructions, injected s
 - **general-engineer** -- Full-stack product work. Inspects the repo first, plans small, verifies before handoff. Default model: OpenRouter `minimax/minimax-m2.7`.
 - **frontend-builder** -- UI-focused. Prioritizes design-system consistency, responsive behavior, accessibility, and state coverage. Default model: OpenRouter `minimax/minimax-m2.7`.
 - **docs-writer** -- Documentation from code. Clones the Fumadocs reference repo, scaffolds a docs app, writes content anchored to actual source files, then typechecks and builds before handing off. Default model: Venice `minimax-m27`.
-- **nansen-analyst** -- Nansen CLI-powered onchain research. Uses Nansen commands for wallet, token, and smart-money analysis, and can publish ephemeral artifact UIs in the sandbox side panel for temporary visual summaries. Default model: OpenRouter `minimax/minimax-m2.7`.
+- **nansen-analyst** -- Nansen CLI-powered onchain research. Uses Nansen commands for wallet, token, and smart-money analysis, and can publish ephemeral artifact UIs in the sandbox side panel for temporary visual summaries. Default model: Venice `minimax-m27`.
 
 Every preset injects a shared delivery workflow: use Bun, run the build and typecheck, fix what you broke, push the branch when GitHub auth is available.
 

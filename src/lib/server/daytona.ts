@@ -8,6 +8,7 @@ export {
   createOpenCodeSandbox,
   deleteOpenCodeSandbox,
   readSandboxCurrentArtifact,
+  sendPromptToSandboxOpencodeSession,
 } from './daytona/operations'
 export {
   buildPreviewCommand,

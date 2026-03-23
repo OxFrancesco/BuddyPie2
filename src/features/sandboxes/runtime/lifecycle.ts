@@ -94,16 +94,18 @@ async function launchSandboxLifecycle(args: {
       githubAuth,
     })
     pendingSandbox = await convex.mutation(api.sandboxes.createPending, {
-      repoUrl: args.normalized.repoUrl,
       repoName: args.normalized.repoName,
-      repoBranch: args.normalized.branch,
-      repoProvider: args.normalized.repoProvider,
       agentPresetId: args.normalized.agentPresetId,
       agentLabel: args.normalized.agentLabel,
       agentProvider: args.normalized.agentProvider,
       agentModel: args.normalized.agentModel,
       initialPrompt: args.normalized.initialPrompt,
       paymentMethod: args.paymentMethod,
+      ...(args.normalized.repoUrl ? { repoUrl: args.normalized.repoUrl } : {}),
+      ...(args.normalized.branch ? { repoBranch: args.normalized.branch } : {}),
+      ...(args.normalized.repoProvider
+        ? { repoProvider: args.normalized.repoProvider }
+        : {}),
     })
     launched = await createOpenCodeSandbox({
       repoUrl: args.normalized.repoUrl,
@@ -201,16 +203,16 @@ async function restartSandboxLifecycle(args: {
       githubAuth,
     })
     pendingSandbox = await convex.mutation(api.sandboxes.createPending, {
-      repoUrl: sandbox.repoUrl,
       repoName: sandbox.repoName,
-      repoBranch: sandbox.repoBranch,
-      repoProvider: sandbox.repoProvider,
       agentPresetId: restartPreset.agentPresetId,
       agentLabel: restartPreset.agentLabel,
       agentProvider: restartPreset.agentProvider,
       agentModel: restartPreset.agentModel,
       initialPrompt: restartPreset.initialPrompt,
       paymentMethod: args.paymentMethod,
+      ...(sandbox.repoUrl ? { repoUrl: sandbox.repoUrl } : {}),
+      ...(sandbox.repoBranch ? { repoBranch: sandbox.repoBranch } : {}),
+      ...(sandbox.repoProvider ? { repoProvider: sandbox.repoProvider } : {}),
     })
     launched = await createOpenCodeSandbox({
       repoUrl: sandbox.repoUrl,

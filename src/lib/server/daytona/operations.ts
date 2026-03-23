@@ -6,9 +6,14 @@ import {
 import {
   buildInitialPromptContent,
   buildOpenCodeSessionPreviewUrl,
+  getPresetById,
   resolveOpenCodeLaunchConfig,
 } from './launch-config'
-import { seedInitialPrompt, startOpencodeWeb } from './opencode'
+import {
+  seedInitialPrompt,
+  sendPromptToExistingSession,
+  startOpencodeWeb,
+} from './opencode'
 import { resolveLaunchPreviewAppPath } from './preview'
 import { createDaytonaClient } from './shared'
 import {
@@ -21,7 +26,7 @@ import {
 } from './workspace'
 
 export async function createOpenCodeSandbox(args: {
-  repoUrl: string
+  repoUrl?: string
   branch?: string
   agentPresetId: string
   agentProvider?: string
@@ -52,11 +57,13 @@ export async function createOpenCodeSandbox(args: {
       initialPrompt: args.initialPrompt,
       githubAuth: args.githubAuth,
     })
-    await configureGitHubAuthForSandbox({
-      sandbox,
-      workspacePath: repo.workspacePath,
-      githubAuth: args.githubAuth,
-    })
+    if (repo.repoProvider === 'github') {
+      await configureGitHubAuthForSandbox({
+        sandbox,
+        workspacePath: repo.workspacePath,
+        githubAuth: args.githubAuth,
+      })
+    }
     const workspaceBootstrap = await bootstrapWorkspace({
       sandbox,
       workspacePath: repo.workspacePath,
@@ -84,6 +91,7 @@ export async function createOpenCodeSandbox(args: {
       sandbox,
       workspacePath: repo.workspacePath,
       preset,
+      launchEnvironment,
     })
 
     const { previewUrl, previewUrlPattern } = await startOpencodeWeb({
@@ -147,4 +155,28 @@ export async function readSandboxCurrentArtifact(args: {
     manifestPath,
     content,
   })
+}
+
+export async function sendPromptToSandboxOpencodeSession(args: {
+  daytonaSandboxId: string
+  workspacePath: string
+  agentPresetId: string
+  opencodeSessionId: string
+  prompt: string
+}) {
+  const sandbox = await createDaytonaClient().get(args.daytonaSandboxId)
+  const preset = getPresetById(args.agentPresetId)
+
+  await sendPromptToExistingSession({
+    sandbox,
+    workspacePath: args.workspacePath,
+    preset,
+    sessionId: args.opencodeSessionId,
+    prompt: args.prompt,
+  })
+
+  return {
+    status: 'queued' as const,
+    sessionId: args.opencodeSessionId,
+  }
 }

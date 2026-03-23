@@ -8,6 +8,7 @@ const MAX_INITIAL_PROMPT_LENGTH = 10_000
 const SANDBOX_WORK_BRANCH_PREFIX = 'codex'
 
 export type SandboxPaymentMethod = 'credits' | 'x402' | 'delegated_budget'
+export type SandboxRepoProvider = 'github' | 'git'
 
 export function isX402SandboxPaymentMethod(
   paymentMethod: SandboxPaymentMethod,
@@ -28,7 +29,7 @@ export function isWalletManagedSandboxPaymentMethod(
 }
 
 export type CreateSandboxInput = {
-  repoUrl: string
+  repoUrl?: string
   branch?: string
   agentPresetId: OpenCodeAgentPresetId
   agentProvider?: string
@@ -38,8 +39,8 @@ export type CreateSandboxInput = {
 }
 
 export function normalizeSandboxInput(input: CreateSandboxInput) {
-  const repoUrl = input.repoUrl.trim()
-  const branch = input.branch?.trim() || undefined
+  const repoUrl = input.repoUrl?.trim() || undefined
+  const branch = repoUrl ? input.branch?.trim() || undefined : undefined
   const preset = getOpenCodeAgentPreset(input.agentPresetId)
   const modelOption = resolveOpenCodeModelOption({
     provider: input.agentProvider,
@@ -49,14 +50,28 @@ export function normalizeSandboxInput(input: CreateSandboxInput) {
   })
   const initialPrompt = input.initialPrompt?.trim() || preset.starterPrompt
 
-  if (!repoUrl) {
-    throw new Error('A repository URL is required.')
-  }
-
   if (initialPrompt.length > MAX_INITIAL_PROMPT_LENGTH) {
     throw new Error(
       `The kickoff prompt is too long. Keep it under ${MAX_INITIAL_PROMPT_LENGTH.toLocaleString()} characters.`,
     )
+  }
+
+  if (!repoUrl) {
+    if (!preset.repositoryOptional) {
+      throw new Error('A repository URL is required for this preset.')
+    }
+
+    return {
+      repoUrl: undefined,
+      branch: undefined,
+      repoName: preset.label,
+      repoProvider: undefined,
+      agentPresetId: preset.id,
+      agentLabel: preset.label,
+      agentProvider: modelOption.provider,
+      agentModel: modelOption.model,
+      initialPrompt,
+    }
   }
 
   let parsedUrl: URL
@@ -108,6 +123,32 @@ export function isGitHubRepo(repoUrl: string | URL) {
 export function getWorkspacePath(repoName: string) {
   const safeRepoName = repoName.replace(/[^a-zA-Z0-9._-]/g, '-')
   return `/home/daytona/${safeRepoName}`
+}
+
+export function getSandboxLaunchQuantitySummary(args: {
+  repoUrl?: string | null
+  branch?: string | null
+}) {
+  if (!args.repoUrl?.trim()) {
+    return 'no repository attached'
+  }
+
+  return args.branch?.trim() || 'default branch'
+}
+
+export function getSandboxRepositoryDisplay(repoUrl?: string | null) {
+  return repoUrl?.trim() || 'No repository attached.'
+}
+
+export function getSandboxBaseBranchDisplay(args: {
+  repoUrl?: string | null
+  repoBranch?: string | null
+}) {
+  if (!args.repoUrl?.trim()) {
+    return 'Not applicable'
+  }
+
+  return args.repoBranch?.trim() || 'default'
 }
 
 function sanitizeGitBranchSegment(value: string) {

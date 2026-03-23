@@ -15,4 +15,5 @@ export {
   getAppPreviewLogsForSandbox,
   getPortPreviewWithPayment,
   readSandboxArtifactForSandbox,
+  sendPromptToSandboxAgent,
 } from './runtime/operations'

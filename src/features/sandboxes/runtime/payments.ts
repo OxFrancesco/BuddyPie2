@@ -194,7 +194,7 @@ export async function captureDelegatedLaunchCharge(args: {
     amountUsdCents,
     idempotencyKey,
     description: `OpenCode sandbox launch for ${args.repoName}`,
-    quantitySummary: args.repoBranch ?? 'default branch',
+    quantitySummary: args.repoBranch ?? 'no repository attached',
     settlementId: settlement.settlementId,
     txHash: settlement.txHash,
     remainingAmountUsdCents: settlement.budget.remainingAmountUsdCents,

@@ -6,7 +6,11 @@ import { Button } from '~/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '~/components/ui/card'
 import { StatusPill } from '~/components/status-pill'
 import { formatSandboxPaymentMethod } from '~/lib/billing/presentation'
-import type { SandboxPaymentMethod } from '~/lib/sandboxes'
+import {
+  getSandboxBaseBranchDisplay,
+  getSandboxRepositoryDisplay,
+  type SandboxPaymentMethod,
+} from '~/lib/sandboxes'
 import type { SandboxDetailRecord } from '../types'
 
 export function SandboxSummaryCard(props: {
@@ -53,7 +57,7 @@ export function SandboxSummaryCard(props: {
               {props.sandbox.repoName}
             </CardTitle>
             <p className="break-all text-sm text-muted-foreground">
-              {props.sandbox.repoUrl}
+              {getSandboxRepositoryDisplay(props.sandbox.repoUrl)}
             </p>
           </div>
 
@@ -104,7 +108,10 @@ export function SandboxSummaryCard(props: {
               Base Branch
             </p>
             <p className="mt-1 font-bold">
-              {props.sandbox.repoBranch || 'default'}
+              {getSandboxBaseBranchDisplay({
+                repoUrl: props.sandbox.repoUrl,
+                repoBranch: props.sandbox.repoBranch,
+              })}
             </p>
           </div>
           <div className="border-2 border-foreground bg-muted p-3">

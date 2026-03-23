@@ -38,12 +38,16 @@ export async function startOpencodeWeb(args: {
   const startCommand = `
 set -e
 cd ${quoteShellArg(args.workspacePath)}
-export PATH="$HOME/.bun/bin:$PATH"
+export PATH="$HOME/.bun/bin:$HOME/.npm-global/bin:$PATH"
 
 OPENCODE_BIN=$(command -v opencode || true)
 
 if [ -z "$OPENCODE_BIN" ] && [ -x "$HOME/.bun/bin/opencode" ]; then
   OPENCODE_BIN="$HOME/.bun/bin/opencode"
+fi
+
+if [ -z "$OPENCODE_BIN" ] && [ -x "$HOME/.npm-global/bin/opencode" ]; then
+  OPENCODE_BIN="$HOME/.npm-global/bin/opencode"
 fi
 
 if [ -z "$OPENCODE_BIN" ]; then
@@ -220,4 +224,80 @@ export async function seedInitialPrompt(args: {
   }
 
   return payload.sessionId
+}
+
+export async function sendPromptToExistingSession(args: {
+  sandbox: Sandbox
+  workspacePath: string
+  preset: OpenCodeAgentPreset
+  sessionId: string
+  prompt: string
+}) {
+  const promptScript = `
+;(async () => {
+  const baseUrl = 'http://127.0.0.1:${OPENCODE_PORT}'
+  const sessionId = process.env.BUDDYPIE_SESSION_ID?.trim() ?? ''
+  const prompt = process.env.BUDDYPIE_PROMPT ?? ''
+  const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
+  const waitForApi = async () => {
+    const timeoutAt = Date.now() + 20_000
+
+    while (Date.now() < timeoutAt) {
+      try {
+        const response = await fetch(\`\${baseUrl}/session/status\`)
+        if (response.ok) {
+          return
+        }
+      } catch {}
+
+      await wait(500)
+    }
+
+    throw new Error('OpenCode API did not become ready in time.')
+  }
+
+  if (!sessionId) {
+    throw new Error('OpenCode session id is missing.')
+  }
+
+  if (!prompt.trim()) {
+    throw new Error('OpenCode prompt is empty.')
+  }
+
+  await waitForApi()
+
+  const promptResponse = await fetch(\`\${baseUrl}/session/\${sessionId}/prompt_async\`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      agent: process.env.BUDDYPIE_AGENT_ID,
+      parts: [{ type: 'text', text: prompt }],
+    }),
+  })
+
+  if (!promptResponse.ok && promptResponse.status !== 204) {
+    throw new Error(\`OpenCode prompt injection failed: \${promptResponse.status} \${await promptResponse.text()}\`)
+  }
+})().catch((error) => {
+  console.error(error instanceof Error ? error.message : String(error))
+  process.exit(1)
+})
+`.trim()
+  const response = (await args.sandbox.process.executeCommand(
+    `node -e ${quoteShellArg(promptScript)}`,
+    args.workspacePath,
+    {
+      BUDDYPIE_AGENT_ID: args.preset.id,
+      BUDDYPIE_SESSION_ID: args.sessionId,
+      BUDDYPIE_PROMPT: args.prompt,
+    },
+    60,
+  )) as ExecuteCommandResponse
+  const stdout = getCommandStdout(response).trim()
+
+  if (response.exitCode !== undefined && response.exitCode !== 0) {
+    throw new Error(
+      `OpenCode prompt injection failed: ${summarizeCommandOutput(stdout)}`,
+    )
+  }
 }

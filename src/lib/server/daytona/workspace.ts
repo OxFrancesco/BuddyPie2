@@ -340,41 +340,72 @@ export async function writeManagedWorkspaceFiles(
     await uploadTextFile(sandbox, skillPath, skill.content)
   }
 
-  await hideManagedFilesFromGitStatus(sandbox, workspacePath, preset)
+  if (repositoryContext) {
+    await hideManagedFilesFromGitStatus(sandbox, workspacePath, preset)
+  }
+}
+
+export function buildManagedSandboxToolingInstallCommand(
+  preset: OpenCodeAgentPreset,
+) {
+  const commandLines = [
+    'set -e',
+    'export PATH="$HOME/.bun/bin:$HOME/.npm-global/bin:$PATH"',
+    'NPM_GLOBAL_PREFIX="$HOME/.npm-global"',
+    '',
+    'BUN_BIN=$(command -v bun || true)',
+    'NPM_BIN=$(command -v npm || true)',
+    '',
+    'if [ -z "$BUN_BIN" ] && [ -x "$HOME/.bun/bin/bun" ]; then',
+    '  BUN_BIN="$HOME/.bun/bin/bun"',
+    'fi',
+    '',
+    'if [ -z "$NPM_BIN" ]; then',
+    '  echo "npm is required in the Daytona sandbox to install BuddyPie managed tooling."',
+    '  exit 1',
+    'fi',
+    '',
+    'mkdir -p "$NPM_GLOBAL_PREFIX/bin"',
+    '',
+    'if [ -n "$BUN_BIN" ]; then',
+    `  if ! "${'$'}BUN_BIN" add -g ${quoteShellArg(`opencode-ai@${OPENCODE_VERSION}`)}; then`,
+    '    echo "Bun global install failed for opencode-ai, falling back to npm." >&2',
+    `    "${'$'}NPM_BIN" install -g --prefix "${'$'}NPM_GLOBAL_PREFIX" ${quoteShellArg(`opencode-ai@${OPENCODE_VERSION}`)}`,
+    '  fi',
+    'else',
+    `  "${'$'}NPM_BIN" install -g --prefix "${'$'}NPM_GLOBAL_PREFIX" ${quoteShellArg(`opencode-ai@${OPENCODE_VERSION}`)}`,
+    'fi',
+  ]
+
+  if (preset.id === 'nansen-analyst') {
+    commandLines.push(
+      '',
+      'NPX_BIN=$(command -v npx || true)',
+      '',
+      'if [ -z "$NPX_BIN" ]; then',
+      '  echo "npx is required in the Daytona sandbox to install Nansen skills."',
+      '  exit 1',
+      'fi',
+      '',
+      `"${'$'}NPM_BIN" install -g --prefix "${'$'}NPM_GLOBAL_PREFIX" ${quoteShellArg(`nansen-cli@${NANSEN_CLI_VERSION}`)}`,
+      `"${'$'}NPX_BIN" --yes skills add ${quoteShellArg('nansen-ai/nansen-cli')}`,
+    )
+  }
+
+  return commandLines.join('\n')
 }
 
 export async function installManagedSandboxTooling(args: {
   sandbox: Sandbox
   workspacePath: string
   preset: OpenCodeAgentPreset
+  launchEnvironment?: Record<string, string>
 }) {
-  const packages = [`opencode-ai@${OPENCODE_VERSION}`]
-
-  if (args.preset.id === 'nansen-analyst') {
-    packages.push(`nansen-cli@${NANSEN_CLI_VERSION}`)
-  }
-
-  const installCommand = `
-set -e
-export PATH="$HOME/.bun/bin:$PATH"
-
-BUN_BIN=$(command -v bun || true)
-
-if [ -z "$BUN_BIN" ] && [ -x "$HOME/.bun/bin/bun" ]; then
-  BUN_BIN="$HOME/.bun/bin/bun"
-fi
-
-if [ -z "$BUN_BIN" ]; then
-  echo "Bun is required in the Daytona sandbox to install BuddyPie managed tooling."
-  exit 1
-fi
-
-"$BUN_BIN" add -g ${packages.map((pkg) => quoteShellArg(pkg)).join(' ')}
-`.trim()
+  const installCommand = buildManagedSandboxToolingInstallCommand(args.preset)
   const response = (await args.sandbox.process.executeCommand(
     installCommand,
     args.workspacePath,
-    undefined,
+    args.launchEnvironment,
     300,
   )) as ExecuteCommandResponse
 
@@ -389,7 +420,7 @@ fi
 
 async function cloneRepository(args: {
   sandbox: Sandbox
-  repoUrl: string
+  repoUrl?: string
   branch?: string
   agentPresetId: OpenCodeAgentPresetId
   initialPrompt?: string
@@ -401,12 +432,17 @@ async function cloneRepository(args: {
     agentPresetId: args.agentPresetId,
     initialPrompt: args.initialPrompt,
   })
+  const repoUrl = normalized.repoUrl
   const workspacePath = getWorkspacePath(normalized.repoName)
+
+  if (!repoUrl) {
+    throw new Error('A repository URL is required to clone this workspace.')
+  }
 
   try {
     if (normalized.repoProvider === 'github' && args.githubAuth?.token) {
       await args.sandbox.git.clone(
-        normalized.repoUrl,
+        repoUrl,
         workspacePath,
         normalized.branch,
         undefined,
@@ -415,7 +451,7 @@ async function cloneRepository(args: {
       )
     } else {
       await args.sandbox.git.clone(
-        normalized.repoUrl,
+        repoUrl,
         workspacePath,
         normalized.branch,
       )
@@ -443,14 +479,42 @@ async function cloneRepository(args: {
   }
 }
 
+async function prepareStandaloneWorkspace(args: {
+  sandbox: Sandbox
+  agentPresetId: OpenCodeAgentPresetId
+  initialPrompt?: string
+}) {
+  const normalized = normalizeSandboxInput({
+    agentPresetId: args.agentPresetId,
+    initialPrompt: args.initialPrompt,
+  })
+  const workspacePath = getWorkspacePath(normalized.repoName)
+
+  await ensureRemoteDirectory(args.sandbox, workspacePath)
+
+  return {
+    ...normalized,
+    workspacePath,
+    repositoryContext: undefined,
+  }
+}
+
 export async function prepareSandboxWorkspace(args: {
   sandbox: Sandbox
-  repoUrl: string
+  repoUrl?: string
   branch?: string
   preset: OpenCodeAgentPreset
   initialPrompt?: string
   githubAuth?: GitHubLaunchAuth | null
 }) {
+  if (!args.repoUrl?.trim()) {
+    return await prepareStandaloneWorkspace({
+      sandbox: args.sandbox,
+      agentPresetId: args.preset.id,
+      initialPrompt: args.initialPrompt,
+    })
+  }
+
   const repo = await cloneRepository({
     sandbox: args.sandbox,
     repoUrl: args.repoUrl,

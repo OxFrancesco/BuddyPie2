@@ -28,6 +28,11 @@ type ReadSandboxArtifactInput = {
   sandboxId: string
 }
 
+type SendSandboxAgentPromptInput = {
+  sandboxId: string
+  prompt: string
+}
+
 type CreateTerminalAccessInput = {
   sandboxId: string
   expiresInMinutes?: number
@@ -193,6 +198,13 @@ export const readSandboxArtifact = createServerFn({ method: 'POST' })
     return await readSandboxArtifactForSandbox({
       sandboxId: data.sandboxId,
     })
+  })
+
+export const sendSandboxAgentPrompt = createServerFn({ method: 'POST' })
+  .inputValidator((data: SendSandboxAgentPromptInput) => data)
+  .handler(async ({ data }) => {
+    const { sendPromptToSandboxAgent } = await import('./runtime.server')
+    return await sendPromptToSandboxAgent(data)
   })
 
 export const createTerminalAccess = createServerFn({ method: 'POST' })

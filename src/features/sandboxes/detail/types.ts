@@ -57,7 +57,7 @@ export type SandboxDetailRecord = {
   _id: string
   status: 'creating' | 'ready' | 'failed'
   repoName: string
-  repoUrl: string
+  repoUrl?: string | null
   repoBranch?: string | null
   repoProvider?: string | null
   agentPresetId?: string | null
@@ -70,5 +70,6 @@ export type SandboxDetailRecord = {
   previewAppPath?: string | null
   workspacePath?: string | null
   daytonaSandboxId?: string | null
+  opencodeSessionId?: string | null
   errorMessage?: string | null
 }

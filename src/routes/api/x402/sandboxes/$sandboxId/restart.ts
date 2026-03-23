@@ -2,6 +2,7 @@ import { createFileRoute } from '@tanstack/react-router'
 import { api } from 'convex/_generated/api'
 import type { Id } from 'convex/_generated/dataModel'
 import { getBillingEventPriceUsdCents } from '~/lib/billing/catalog'
+import { getSandboxLaunchQuantitySummary } from '~/lib/sandboxes'
 
 export const Route = createFileRoute('/api/x402/sandboxes/$sandboxId/restart')({
   server: {
@@ -58,7 +59,10 @@ export const Route = createFileRoute('/api/x402/sandboxes/$sandboxId/restart')({
             amountUsdCents,
             idempotencyKey: `x402:sandbox_restart:${settlement.transaction}`,
             description: `Restarted ${auth.sandbox.repoName}`,
-            quantitySummary: auth.sandbox.repoBranch ?? 'default branch',
+            quantitySummary: getSandboxLaunchQuantitySummary({
+              repoUrl: auth.sandbox.repoUrl,
+              branch: auth.sandbox.repoBranch,
+            }),
             externalReference: settlement.transaction,
             metadataJson: JSON.stringify({
               network: settlement.network,

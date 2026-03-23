@@ -1,9 +1,11 @@
-import type { Dispatch, SetStateAction } from 'react'
+import { useEffect, useState, type Dispatch, type SetStateAction } from 'react'
+import { CopyIcon, Maximize2Icon, SparklesIcon } from 'lucide-react'
 import { Link } from '@tanstack/react-router'
 import type { SandboxArtifactReadResult } from '~/lib/artifacts'
 import { SandboxArtifactRenderer } from '~/components/sandbox-artifact-renderer'
 import { Alert, AlertDescription } from '~/components/ui/alert'
 import { Button } from '~/components/ui/button'
+import { Dialog, DialogContent, DialogTitle } from '~/components/ui/dialog'
 import {
   formatDateTime,
   isValidPreviewPort,
@@ -35,6 +37,7 @@ export function SandboxUtilityDrawer(props: {
   handlePanelSwipeStart: (touchX: number) => void
   handlePanelSwipeEnd: (touchX: number) => void
   artifact: ArtifactState
+  onSendArtifactFixPrompt: (prompt: string) => Promise<void>
   paymentMethod: SandboxPaymentMethod
   hasActiveDelegatedBudget: boolean
   preview: {
@@ -143,7 +146,11 @@ export function SandboxUtilityDrawer(props: {
           </div>
 
           {props.utilityDrawerTab === 'artifacts' ? (
-            <ArtifactsPane sandbox={props.sandbox} artifact={props.artifact} />
+            <ArtifactsPane
+              sandbox={props.sandbox}
+              artifact={props.artifact}
+              onSendArtifactFixPrompt={props.onSendArtifactFixPrompt}
+            />
           ) : (
             <PreviewPane
               sandbox={props.sandbox}
@@ -162,7 +169,95 @@ export function SandboxUtilityDrawer(props: {
 function ArtifactsPane(props: {
   sandbox: SandboxDetailRecord
   artifact: ArtifactState
+  onSendArtifactFixPrompt: (prompt: string) => Promise<void>
 }) {
+  const [isArtifactFullscreen, setIsArtifactFullscreen] = useState(false)
+  const [copyState, setCopyState] = useState<string | null>(null)
+  const [fixState, setFixState] = useState<
+    'idle' | 'sending' | 'sent' | 'error'
+  >('idle')
+  const [fixError, setFixError] = useState<string | null>(null)
+  const [lastAutoFixKey, setLastAutoFixKey] = useState<string | null>(null)
+  const invalidArtifact =
+    props.artifact.result?.status === 'invalid' ? props.artifact.result : null
+  const readyArtifact =
+    props.artifact.result?.status === 'ready' ? props.artifact.result : null
+
+  async function copyText(text: string, successLabel: string) {
+    try {
+      await navigator.clipboard.writeText(text)
+      setCopyState(successLabel)
+    } catch {
+      setCopyState('Copy failed')
+    }
+  }
+
+  function buildFixPrompt() {
+    if (!invalidArtifact) {
+      return null
+    }
+
+    return [
+      `fix this error please + ${invalidArtifact.error}`,
+      `Manifest path: ${invalidArtifact.manifestPath}`,
+      'Current raw content:',
+      invalidArtifact.rawContent,
+    ].join('\n\n')
+  }
+
+  async function sendFixPrompt(prompt: string) {
+    setFixState('sending')
+    setFixError(null)
+
+    try {
+      await props.onSendArtifactFixPrompt(prompt)
+      setFixState('sent')
+    } catch (error) {
+      setFixState('error')
+      setFixError(
+        error instanceof Error
+          ? error.message
+          : 'Could not send the repair prompt to the agent.',
+      )
+    }
+  }
+
+  useEffect(() => {
+    if (!copyState) {
+      return
+    }
+
+    const timeout = window.setTimeout(() => {
+      setCopyState(null)
+    }, 2_000)
+
+    return () => window.clearTimeout(timeout)
+  }, [copyState])
+
+  useEffect(() => {
+    const prompt = buildFixPrompt()
+
+    if (!prompt || props.sandbox.status !== 'ready') {
+      return
+    }
+
+    const autoFixKey = `${props.sandbox._id}:${prompt}`
+
+    if (lastAutoFixKey === autoFixKey || fixState === 'sending') {
+      return
+    }
+
+    setLastAutoFixKey(autoFixKey)
+    void sendFixPrompt(prompt)
+  }, [
+    fixState,
+    lastAutoFixKey,
+    props.artifact.result,
+    props.onSendArtifactFixPrompt,
+    props.sandbox._id,
+    props.sandbox.status,
+  ])
+
   return (
     <>
       <div className="border-b-2 border-foreground bg-muted px-4 py-3">
@@ -210,17 +305,58 @@ function ArtifactsPane(props: {
                 : 'Could not load the current artifact manifest.'}
             </AlertDescription>
           </Alert>
-        ) : props.artifact.result?.status === 'invalid' ? (
+        ) : invalidArtifact ? (
           <div className="space-y-4">
             <Alert variant="destructive" className="border-2 border-foreground">
-              <AlertDescription>{props.artifact.result.error}</AlertDescription>
+              <AlertDescription>{invalidArtifact.error}</AlertDescription>
             </Alert>
+            <div className="flex flex-wrap gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="border-2 border-foreground font-black uppercase"
+                onClick={() => void copyText(invalidArtifact.rawContent, 'JSON copied')}
+              >
+                <CopyIcon />
+                Copy JSON
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="border-2 border-foreground font-black uppercase"
+                onClick={() => {
+                  const prompt = buildFixPrompt()
+                  if (prompt) {
+                    void sendFixPrompt(prompt)
+                  }
+                }}
+                disabled={fixState === 'sending'}
+              >
+                <SparklesIcon />
+                {fixState === 'sending' ? 'Sending...' : 'Ask Agent To Fix'}
+              </Button>
+            </div>
+            {copyState ? (
+              <p className="text-xs font-bold uppercase text-muted-foreground">
+                {copyState}
+              </p>
+            ) : null}
+            {fixState === 'sent' ? (
+              <p className="text-xs font-bold uppercase text-muted-foreground">
+                Repair prompt sent to the agent session.
+              </p>
+            ) : null}
+            {fixError ? (
+              <p className="text-xs text-destructive">{fixError}</p>
+            ) : null}
             <div className="rounded-md border-2 border-foreground bg-background p-3">
               <p className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">
                 Manifest Path
               </p>
               <p className="mt-2 break-all text-xs font-bold">
-                {props.artifact.result.manifestPath}
+                {invalidArtifact.manifestPath}
               </p>
             </div>
             <div className="rounded-md border-2 border-foreground bg-background p-3">
@@ -228,11 +364,11 @@ function ArtifactsPane(props: {
                 Raw Content
               </p>
               <pre className="mt-2 max-h-80 overflow-auto whitespace-pre-wrap rounded border border-foreground/30 bg-muted p-2 text-[11px]">
-                {props.artifact.result.rawContent}
+                {invalidArtifact.rawContent}
               </pre>
             </div>
           </div>
-        ) : props.artifact.result?.status === 'ready' ? (
+        ) : readyArtifact ? (
           <div className="space-y-4">
             <div className="rounded-md border-2 border-foreground bg-background p-3">
               <div className="flex flex-wrap items-start justify-between gap-3">
@@ -241,11 +377,11 @@ function ArtifactsPane(props: {
                     Current Artifact
                   </p>
                   <p className="mt-2 text-lg font-black uppercase">
-                    {props.artifact.result.manifest.title}
+                    {readyArtifact.manifest.title}
                   </p>
-                  {props.artifact.result.manifest.summary ? (
+                  {readyArtifact.manifest.summary ? (
                     <p className="mt-2 text-sm text-muted-foreground">
-                      {props.artifact.result.manifest.summary}
+                      {readyArtifact.manifest.summary}
                     </p>
                   ) : null}
                 </div>
@@ -255,21 +391,81 @@ function ArtifactsPane(props: {
                   </p>
                   <p className="mt-2 text-xs font-bold">
                     {formatDateTime(
-                      props.artifact.result.manifest.generatedAt,
-                    ) ?? props.artifact.result.manifest.generatedAt}
+                      readyArtifact.manifest.generatedAt,
+                    ) ?? readyArtifact.manifest.generatedAt}
                   </p>
                 </div>
               </div>
               <p className="mt-3 break-all text-[11px] text-muted-foreground">
-                {props.artifact.result.manifestPath}
+                {readyArtifact.manifestPath}
               </p>
+              <div className="mt-3 flex flex-wrap justify-end gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="border-2 border-foreground font-black uppercase"
+                  onClick={() =>
+                    void copyText(
+                      JSON.stringify(readyArtifact.manifest, null, 2),
+                      'JSON copied',
+                    )
+                  }
+                >
+                  <CopyIcon />
+                  Copy JSON
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="border-2 border-foreground font-black uppercase"
+                  onClick={() => setIsArtifactFullscreen(true)}
+                >
+                  <Maximize2Icon />
+                  Full Screen
+                </Button>
+              </div>
             </div>
+            {copyState ? (
+              <p className="text-xs font-bold uppercase text-muted-foreground">
+                {copyState}
+              </p>
+            ) : null}
 
             <div className="rounded-md border-2 border-foreground bg-background p-4">
-              <SandboxArtifactRenderer
-                manifest={props.artifact.result.manifest}
-              />
+              <SandboxArtifactRenderer manifest={readyArtifact.manifest} />
             </div>
+
+            <Dialog
+              open={isArtifactFullscreen}
+              onOpenChange={setIsArtifactFullscreen}
+            >
+              <DialogContent
+                className="inset-0 flex h-screen w-screen max-w-none translate-x-0 translate-y-0 flex-col rounded-none border-0 p-0 ring-0 sm:max-w-none"
+                showCloseButton={true}
+              >
+                <div className="border-b-2 border-foreground bg-background px-5 py-4 pr-14">
+                  <DialogTitle className="text-lg font-black uppercase">
+                    {readyArtifact.manifest.title}
+                  </DialogTitle>
+                  {readyArtifact.manifest.summary ? (
+                    <p className="mt-2 text-sm text-muted-foreground">
+                      {readyArtifact.manifest.summary}
+                    </p>
+                  ) : null}
+                  <p className="mt-3 break-all text-[11px] text-muted-foreground">
+                    {readyArtifact.manifestPath}
+                  </p>
+                </div>
+
+                <div className="min-h-0 flex-1 overflow-auto bg-card p-4 md:p-6">
+                  <div className="min-h-full bg-background p-2 md:p-4">
+                    <SandboxArtifactRenderer manifest={readyArtifact.manifest} />
+                  </div>
+                </div>
+              </DialogContent>
+            </Dialog>
           </div>
         ) : (
           <div className="flex h-full min-h-[260px] items-center justify-center text-center">

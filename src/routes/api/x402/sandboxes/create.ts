@@ -2,7 +2,11 @@ import { createFileRoute } from '@tanstack/react-router'
 import { api } from 'convex/_generated/api'
 import type { Id } from 'convex/_generated/dataModel'
 import { getBillingEventPriceUsdCents } from '~/lib/billing/catalog'
-import { normalizeSandboxInput, type CreateSandboxInput } from '~/lib/sandboxes'
+import {
+  getSandboxLaunchQuantitySummary,
+  normalizeSandboxInput,
+  type CreateSandboxInput,
+} from '~/lib/sandboxes'
 
 export const Route = createFileRoute('/api/x402/sandboxes/create')({
   server: {
@@ -81,7 +85,10 @@ export const Route = createFileRoute('/api/x402/sandboxes/create')({
             amountUsdCents,
             idempotencyKey: `x402:sandbox_launch:${settlement.transaction}`,
             description: `OpenCode sandbox launch for ${normalized.repoName}`,
-            quantitySummary: normalized.branch ?? 'default branch',
+            quantitySummary: getSandboxLaunchQuantitySummary({
+              repoUrl: normalized.repoUrl,
+              branch: normalized.branch,
+            }),
             externalReference: settlement.transaction,
             metadataJson: JSON.stringify({
               network: settlement.network,

@@ -9,6 +9,7 @@ import {
   getSandboxAppPreviewLogTail,
   getSandboxPortPreviewUrl,
   readSandboxCurrentArtifact,
+  sendPromptToSandboxOpencodeSession,
 } from '~/lib/server/daytona'
 import { withPaidSandboxAction } from './payments'
 
@@ -171,5 +172,28 @@ export async function getPortPreviewWithPayment(
   return await getSandboxPortPreviewUrl({
     daytonaSandboxId: sandbox.daytonaSandboxId,
     port,
+  })
+}
+
+export async function sendPromptToSandboxAgent(args: {
+  sandboxId: string
+  prompt: string
+}) {
+  const sandbox = await fetchOwnedSandboxOrThrow(args.sandboxId)
+
+  if (
+    !sandbox.daytonaSandboxId ||
+    !sandbox.workspacePath ||
+    !sandbox.opencodeSessionId
+  ) {
+    throw new Error('Sandbox runtime is not ready for agent prompts yet.')
+  }
+
+  return await sendPromptToSandboxOpencodeSession({
+    daytonaSandboxId: sandbox.daytonaSandboxId,
+    workspacePath: sandbox.workspacePath,
+    agentPresetId: sandbox.agentPresetId ?? 'general-engineer',
+    opencodeSessionId: sandbox.opencodeSessionId,
+    prompt: args.prompt,
   })
 }

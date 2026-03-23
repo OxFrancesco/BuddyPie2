@@ -14,6 +14,7 @@ import {
   deleteSandbox,
   readSandboxArtifact,
   restartSandbox,
+  sendSandboxAgentPrompt,
 } from '~/features/sandboxes/server'
 import { SandboxMissingState } from '~/features/sandboxes/detail/components/SandboxMissingState'
 import { SandboxSummaryCard } from '~/features/sandboxes/detail/components/SandboxSummaryCard'
@@ -171,6 +172,19 @@ function SandboxDetailRoute() {
         queryKey: ['sandbox', params.sandboxId, 'artifact'],
       }),
     ])
+  }
+
+  async function handleSendArtifactFixPrompt(prompt: string) {
+    if (!sandbox) {
+      return
+    }
+
+    await sendSandboxAgentPrompt({
+      data: {
+        sandboxId: sandbox._id,
+        prompt,
+      },
+    })
   }
 
   function blockDelegatedBudgetAction() {
@@ -390,6 +404,7 @@ function SandboxDetailRoute() {
           isLoading: artifactQuery.isLoading,
           error: artifactQuery.error,
         }}
+        onSendArtifactFixPrompt={handleSendArtifactFixPrompt}
         paymentMethod={paymentMethod}
         hasActiveDelegatedBudget={hasActiveDelegatedBudget}
         preview={preview}

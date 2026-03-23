@@ -194,10 +194,11 @@ Use this after implementing UI changes and before reporting the result.
     label: 'Nansen Analyst',
     description:
       'Onchain research preset for Nansen CLI workflows with ephemeral artifact UIs.',
-    defaultModelOptionId: 'openrouter-minimax-m2.7',
-    provider: 'openrouter',
-    model: 'minimax/minimax-m2.7',
-    requiredEnv: ['OPENROUTER_API_KEY', 'NANSEN_API_KEY'],
+    repositoryOptional: true,
+    defaultModelOptionId: 'venice-minimax-m2.7',
+    provider: 'venice',
+    model: 'minimax-m27',
+    requiredEnv: ['VENICE_API_KEY', 'NANSEN_API_KEY'],
     agentPrompt: withSharedDeliveryPrompt(
       'Act as an onchain research analyst. Use Nansen CLI as the primary source for Nansen-backed analytics, keep commands reproducible, and when a visual summary would help the user, publish a temporary artifact manifest for BuddyPie to render while keeping OpenCode as the main workspace.',
     ),
@@ -216,18 +217,24 @@ This sandbox was launched with BuddyPie's Nansen-focused research preset.
 
 ## Workflow
 
-- Inspect the repo and the user's request before running Nansen commands.
+- Inspect the user's request and any attached repo before running Nansen commands.
 - Use \`nansen schema --pretty\` when you need the CLI surface or output shape.
 - Treat the Nansen CLI response as the source material, then summarize or visualize only the fields that matter.
 - Keep artifacts read-only in v1. Do not rely on json-render actions or interactive workflows.
 - When you publish an artifact, write it atomically:
   1. write JSON to \`.buddypie/artifacts/current.json.tmp\`
-  2. rename it to \`.buddypie/artifacts/current.json\`
+  2. validate the temp file before promotion with a real JSON parser, for example \`node -e "JSON.parse(require('node:fs').readFileSync('.buddypie/artifacts/current.json.tmp', 'utf8'))"\`
+  3. if validation fails, fix the JSON and do not replace the live manifest
+  4. create \`.buddypie/artifacts/history/\` if it does not exist
+  5. if \`.buddypie/artifacts/current.json\` already exists, copy that full previous dashboard into \`.buddypie/artifacts/history/\` before replacing it
+  6. copy the new validated temp file into \`.buddypie/artifacts/history/\` with a timestamped filename so each complete dashboard is saved
+  7. rename it to \`.buddypie/artifacts/current.json\`
 - Artifact manifest contract:
   - path: \`.buddypie/artifacts/current.json\`
   - missing file means there is no active artifact
   - replacing the file replaces the current artifact
   - deleting the file clears the artifact panel
+  - archive path: \`.buddypie/artifacts/history/\`
   - JSON shape:
     - \`version\`: \`1\`
     - \`kind\`: \`json-render\`
@@ -235,9 +242,24 @@ This sandbox was launched with BuddyPie's Nansen-focused research preset.
     - \`summary\`: optional concise summary
     - \`generatedAt\`: ISO timestamp
     - \`spec\`: json-render spec object
-- Prefer read-only analytics layouts such as cards, headings, text, badges, tables, grids, separators, progress, and alerts.
+- JSON must be strict JSON:
+  - do not use leading \`+\` on numbers
+  - do not use trailing commas
+  - do not use comments
+  - all keys and string values must be double-quoted
+- Preferred simplified artifact layout for BuddyPie Nansen artifacts:
+  - \`spec.layout\`: \`cards\`
+  - \`spec.sections\`: array of sections
+  - supported section types:
+    - \`card\` with \`title\`, optional \`fields\`, optional \`table\`
+    - \`alert\` with \`title\`, optional \`body\`, optional \`alert\`
+    - \`separator\`
+    - \`relation-graph\` with \`title\`, optional \`description\`, optional \`center\`, \`nodes\`, and \`edges\`
+- Do not invent unsupported section or field types such as ad hoc \`chart\` payloads unless the BuddyPie manifest contract explicitly supports them.
+- Prefer read-only analytics layouts such as cards, headings, text, badges, tables, grids, separators, progress, alerts, and relation graphs.
 - Keep artifact copy concise and use the chat thread for detailed caveats.
 - Delete \`.buddypie/artifacts/current.json\` once the artifact is stale, superseded, or no longer useful.
+- Keep archived snapshots in \`.buddypie/artifacts/history/\` unless the user explicitly asks you to prune them.
 - If \`nansen\` is not on PATH in a shell, run \`export PATH="$HOME/.bun/bin:$PATH"\` and retry.
 - Load the BuddyPie skills below when they match the task.
 
@@ -250,7 +272,7 @@ This sandbox was launched with BuddyPie's Nansen-focused research preset.
 `.trim(),
     ),
     starterPrompt:
-      'Review the request, identify the smallest set of Nansen CLI commands that can answer it, and inspect the repo before editing. Use Nansen CLI for the research work, summarize the result clearly, and when a visual snapshot would help, publish a temporary artifact manifest at `.buddypie/artifacts/current.json` for BuddyPie to render. Keep the artifact read-only, replace it atomically when it changes, and delete it when it is no longer useful.',
+      'Review the request, identify the smallest set of Nansen CLI commands that can answer it, and inspect any attached repo before editing. Use Nansen CLI for the research work, summarize the result clearly, and when a visual snapshot would help, publish a temporary artifact manifest at `.buddypie/artifacts/current.json` for BuddyPie to render. Prefer the simplified BuddyPie cards layout with card, alert, separator, and relation-graph sections. Validate the temp JSON with a real parser before promoting it, and do not publish malformed JSON or unsupported section types. Archive each full validated dashboard under `.buddypie/artifacts/history/` before replacing `current.json`, keep the artifact read-only, replace it atomically when it changes, and delete it when it is no longer useful.',
     starterPromptPlaceholder:
       'Describe the wallet, token, smart-money flow, or onchain research question to investigate.',
     skills: [

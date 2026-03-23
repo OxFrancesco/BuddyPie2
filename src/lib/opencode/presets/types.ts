@@ -42,6 +42,7 @@ export type OpenCodeAgentPresetDefinition = {
   id: string
   label: string
   description: string
+  repositoryOptional?: boolean
   defaultModelOptionId: string
   provider: string
   model: string
