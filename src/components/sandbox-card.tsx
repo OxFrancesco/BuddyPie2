@@ -13,14 +13,19 @@ import {
   getOpenCodeModelOptionByProviderAndModel,
   getSafeOpenCodeAgentPreset,
 } from '~/lib/opencode/presets'
+import {
+  getSandboxBaseBranchDisplay,
+  getSandboxRepositoryDisplay,
+  type SandboxRepoProvider,
+} from '~/lib/sandboxes'
 
 type SandboxCardProps = {
   sandbox: {
     _id: string
     repoName: string
-    repoUrl: string
+    repoUrl?: string
     repoBranch?: string
-    repoProvider: 'github' | 'git'
+    repoProvider?: SandboxRepoProvider
     agentPresetId?: string
     agentLabel?: string
     agentProvider?: string
@@ -92,7 +97,7 @@ export function SandboxCard({
           {sandbox.repoName}
         </CardTitle>
         <p className="break-all text-sm text-muted-foreground">
-          {sandbox.repoUrl}
+          {getSandboxRepositoryDisplay(sandbox.repoUrl)}
         </p>
       </CardHeader>
 
@@ -102,7 +107,12 @@ export function SandboxCard({
             <p className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">
               Base Branch
             </p>
-            <p className="mt-1 font-bold">{sandbox.repoBranch || 'default'}</p>
+            <p className="mt-1 font-bold">
+              {getSandboxBaseBranchDisplay({
+                repoUrl: sandbox.repoUrl,
+                repoBranch: sandbox.repoBranch,
+              })}
+            </p>
           </div>
           <div className="border-2 border-foreground bg-muted p-3">
             <p className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">

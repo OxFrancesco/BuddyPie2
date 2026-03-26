@@ -179,6 +179,8 @@ function DashboardRoute() {
   const isRefreshingGithubRepos = githubReposQuery.isFetching
   const githubAlertMessage = githubPickerError ?? githubReposError
   const selectedPreset = getOpenCodeAgentPreset(agentPresetId)
+  const isRepositoryOptional = selectedPreset.repositoryOptional === true
+  const hasRepoUrl = repoUrl.trim().length > 0
 
   async function refreshDashboard() {
     await Promise.all([
@@ -315,9 +317,8 @@ function DashboardRoute() {
         agentProvider: selectedPreset.provider,
         agentModel: selectedPreset.model,
         initialPrompt,
-        repoUrl,
-        branch,
         paymentMethod,
+        ...(hasRepoUrl ? { repoUrl, branch } : {}),
       }
 
       const result = isX402SandboxPaymentMethod(paymentMethod)
@@ -393,7 +394,9 @@ function DashboardRoute() {
               Launch Workspace
             </CardTitle>
             <p className="mt-3 max-w-2xl text-sm text-muted-foreground">
-              Choose an agent preset and a repository to launch a workspace.
+              {isRepositoryOptional
+                ? 'Choose an agent preset and attach a repository only when the task needs repo context.'
+                : 'Choose an agent preset and a repository to launch a workspace.'}
             </p>
           </CardHeader>
 
@@ -405,7 +408,7 @@ function DashboardRoute() {
               <div
                 role="radiogroup"
                 aria-label="OpenCode preset agent"
-                className="grid gap-3 md:grid-cols-3"
+                className="grid gap-3 md:grid-cols-2 xl:grid-cols-4"
               >
                 {openCodeAgentPresets.map((preset) => {
                   const isSelected = preset.id === agentPresetId
@@ -497,12 +500,12 @@ function DashboardRoute() {
                     htmlFor="repo-url"
                     className="text-[10px] font-black uppercase tracking-widest"
                   >
-                    Repository URL
+                    Repository URL{isRepositoryOptional ? ' (Optional)' : ''}
                   </label>
                   <Input
                     id="repo-url"
                     type="url"
-                    required
+                    required={!isRepositoryOptional}
                     list={
                       githubRepos.length > 0 ? 'github-repo-options' : undefined
                     }
@@ -515,7 +518,9 @@ function DashboardRoute() {
                   {github.connected ? (
                     <div className="flex flex-col gap-2">
                       <p className="text-xs text-muted-foreground">
-                        {github.message}
+                        {isRepositoryOptional
+                          ? 'Leave this blank to launch a standalone research workspace, or paste a repo URL when the task needs code context.'
+                          : github.message}
                       </p>
                       <div className="flex flex-wrap items-center gap-3">
                         <Button
@@ -545,7 +550,9 @@ function DashboardRoute() {
                     </div>
                   ) : (
                     <p className="text-xs text-muted-foreground">
-                      {github.message}
+                      {isRepositoryOptional
+                        ? 'Leave this blank to launch a standalone workspace, or paste any HTTPS Git repository URL when you want code context.'
+                        : github.message}
                     </p>
                   )}
                 </div>
@@ -560,6 +567,7 @@ function DashboardRoute() {
                   <Input
                     id="branch"
                     type="text"
+                    disabled={!hasRepoUrl}
                     list={
                       githubBranches.length > 0
                         ? 'github-branch-options'
@@ -574,13 +582,17 @@ function DashboardRoute() {
                     className="border-2 border-foreground bg-background font-mono text-xs shadow-[2px_2px_0_var(--foreground)] focus-visible:shadow-none"
                   />
                   <p className="text-[11px] leading-snug text-muted-foreground">
-                    {isLoadingGithubBranches
-                      ? 'Fetching branches...'
-                      : selectedGithubRepoFullName && githubBranches.length > 0
-                        ? `${githubBranches.length} branch${githubBranches.length === 1 ? '' : 'es'} from ${selectedGithubRepoFullName}.`
-                        : 'Leave blank for the default branch.'}{' '}
-                    BuddyPie clones this branch, then immediately creates a
-                    dedicated working branch for the agent.
+                    {!hasRepoUrl
+                      ? 'Add a repository URL to target a specific branch.'
+                      : isLoadingGithubBranches
+                        ? 'Fetching branches...'
+                        : selectedGithubRepoFullName &&
+                            githubBranches.length > 0
+                          ? `${githubBranches.length} branch${githubBranches.length === 1 ? '' : 'es'} from ${selectedGithubRepoFullName}.`
+                          : 'Leave blank for the default branch.'}{' '}
+                    {hasRepoUrl
+                      ? 'BuddyPie clones this branch, then immediately creates a dedicated working branch for the agent.'
+                      : null}
                   </p>
                 </div>
               </div>

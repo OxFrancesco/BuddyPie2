@@ -14,10 +14,10 @@ export const sandboxRecordValidator = v.object({
   _id: v.id('sandboxes'),
   _creationTime: v.number(),
   userId: v.id('users'),
-  repoUrl: v.string(),
+  repoUrl: v.optional(v.string()),
   repoName: v.string(),
   repoBranch: v.optional(v.string()),
-  repoProvider: v.union(v.literal('github'), v.literal('git')),
+  repoProvider: v.optional(v.union(v.literal('github'), v.literal('git'))),
   agentPresetId: v.optional(v.string()),
   agentLabel: v.optional(v.string()),
   agentProvider: v.optional(v.string()),
@@ -109,10 +109,10 @@ export const get = query({
 
 export const createPending = mutation({
   args: {
-    repoUrl: v.string(),
+    repoUrl: v.optional(v.string()),
     repoName: v.string(),
     repoBranch: v.optional(v.string()),
-    repoProvider: v.union(v.literal('github'), v.literal('git')),
+    repoProvider: v.optional(v.union(v.literal('github'), v.literal('git'))),
     agentPresetId: v.string(),
     agentLabel: v.string(),
     agentProvider: v.string(),
@@ -130,9 +130,7 @@ export const createPending = mutation({
     const now = Date.now()
     const sandboxId = await ctx.db.insert('sandboxes', {
       userId: user._id,
-      repoUrl: args.repoUrl,
       repoName: args.repoName,
-      repoProvider: args.repoProvider,
       agentPresetId: args.agentPresetId,
       agentLabel: args.agentLabel,
       agentProvider: args.agentProvider,
@@ -141,6 +139,8 @@ export const createPending = mutation({
       pendingPaymentMethod: args.paymentMethod,
       createdAt: now,
       updatedAt: now,
+      ...(args.repoUrl ? { repoUrl: args.repoUrl } : {}),
+      ...(args.repoProvider ? { repoProvider: args.repoProvider } : {}),
       ...(args.repoBranch ? { repoBranch: args.repoBranch } : {}),
       ...(args.initialPrompt ? { initialPrompt: args.initialPrompt } : {}),
       billedUsdCents: 0,
@@ -158,7 +158,9 @@ export const createPending = mutation({
         purpose: 'sandbox_launch',
         idempotencyKey: `sandbox-launch:${sandboxId}`,
         description: `Launch hold for ${args.repoName}`,
-        quantitySummary: args.repoBranch ?? 'default branch',
+        quantitySummary: args.repoUrl
+          ? args.repoBranch ?? 'default branch'
+          : 'no repository attached',
       })
 
       await ctx.db.patch(sandboxId, {
@@ -198,7 +200,9 @@ export const markReady = mutation({
         sandboxId: sandbox._id,
         eventType: 'sandbox_launch',
         description: `OpenCode sandbox launch for ${sandbox.repoName}`,
-        quantitySummary: sandbox.repoBranch ?? 'default branch',
+        quantitySummary: sandbox.repoUrl
+          ? sandbox.repoBranch ?? 'default branch'
+          : 'no repository attached',
         idempotencyKey: `sandbox-launch-capture:${sandbox._id}`,
         costUsdCents: getUsageEventCostUsdCents(
           sandbox.agentPresetId ?? 'general-engineer',

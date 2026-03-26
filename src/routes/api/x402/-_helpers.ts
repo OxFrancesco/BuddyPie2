@@ -1,6 +1,23 @@
-import { api } from 'convex/_generated/api'
+import { Effect } from 'effect'
 import type { Id } from 'convex/_generated/dataModel'
-import { getAuthenticatedConvexClient } from '~/lib/server/authenticated-convex'
+import { ConvexService, X402Service } from '~/lib/server/effect/services'
+import type { DomainError } from '~/lib/server/effect/errors'
+
+type AuthenticatedRouteContext = Awaited<
+  ReturnType<typeof import('~/lib/server/authenticated-convex').getAuthenticatedConvexClient>
+>
+
+export type OwnedSandboxRouteContext = AuthenticatedRouteContext & {
+  sandbox: Awaited<
+    ReturnType<Awaited<ReturnType<typeof import('~/lib/server/authenticated-convex').getAuthenticatedConvexClient>>['convex']['query']>
+  >
+}
+
+export type X402Settlement = Awaited<
+  ReturnType<
+    Extract<Awaited<ReturnType<typeof import('~/lib/server/x402').requireX402Payment>>, { ok: true }>['settle']
+  >
+>
 
 export function jsonError(message: string, status: number) {
   return Response.json({ error: message }, { status })
@@ -14,46 +31,68 @@ export async function parseJsonBody<T>(request: Request) {
   }
 }
 
-export async function getAuthenticatedRouteContext() {
-  try {
-    const context = await getAuthenticatedConvexClient()
-    await context.convex.mutation(api.user.ensureCurrentUser, {})
+export function getAuthenticatedRouteContextProgram() {
+  return Effect.gen(function*() {
+    const convex = yield* ConvexService
+    yield* convex.ensureCurrentUser
 
-    return {
-      ok: true as const,
-      ...context,
-    }
-  } catch (error) {
-    return {
-      ok: false as const,
-      response: jsonError(
-        error instanceof Error ? error.message : 'You must be signed in to continue.',
-        401,
-      ),
-    }
-  }
+    return convex.context
+  })
 }
 
-export async function getOwnedSandboxRouteContext(sandboxId: string) {
-  const auth = await getAuthenticatedRouteContext()
+export function getOwnedSandboxRouteContextProgram(sandboxId: string) {
+  return Effect.gen(function*() {
+    const convex = yield* ConvexService
+    yield* convex.ensureCurrentUser
+    const sandbox = yield* convex.getOwnedSandbox(sandboxId)
 
-  if (!auth.ok) {
-    return auth
-  }
-
-  const sandbox = await auth.convex.query(api.sandboxes.get, {
-    sandboxId: sandboxId as Id<'sandboxes'>,
-  })
-
-  if (!sandbox) {
     return {
-      ok: false as const,
-      response: jsonError('Sandbox not found.', 404),
+      ...convex.context,
+      sandbox,
     }
-  }
+  })
+}
 
-  return {
-    ...auth,
-    sandbox,
-  }
+export function executeX402PaymentRoute<TContext, TResult, R>(args: {
+  request: Request
+  context: Effect.Effect<TContext, DomainError, R>
+  amountUsdCents: (context: TContext) => number
+  resourceDescription: (context: TContext) => string
+  execute: (context: TContext) => Effect.Effect<TResult, DomainError, R>
+  recordCharge: (
+    context: TContext,
+    settlement: X402Settlement,
+    result: TResult,
+  ) => Effect.Effect<void, DomainError, R>
+  shouldSettle?: (result: TResult) => boolean
+  success?: (result: TResult) => Response
+}) {
+  return Effect.gen(function*() {
+    const context = yield* args.context
+    const x402 = yield* X402Service
+    const payment = yield* x402.requirePayment({
+      request: args.request,
+      amountUsdCents: args.amountUsdCents(context),
+      resourceDescription: args.resourceDescription(context),
+    })
+
+    if (!payment.ok) {
+      return payment.response
+    }
+
+    const result = yield* args.execute(context)
+
+    if (args.shouldSettle && !args.shouldSettle(result)) {
+      return args.success ? args.success(result) : Response.json(result)
+    }
+
+    const settlement = yield* x402.settlePayment(payment)
+    yield* args.recordCharge(context, settlement, result)
+
+    return args.success ? args.success(result) : Response.json(result)
+  })
+}
+
+export function sandboxIdParamToId(sandboxId: string) {
+  return sandboxId as Id<'sandboxes'>
 }

@@ -100,6 +100,43 @@ describe('resolveOpenCodeLaunchConfig', () => {
     expect(launchEnvironment.GITHUB_OAUTH_ACCOUNT_NAME).toBeUndefined()
     expect(launchEnvironment.GITHUB_OAUTH_ACCOUNT_ID).toBeUndefined()
   })
+
+  test('throws before sandbox creation when the nansen preset key is missing', () => {
+    process.env.VENICE_API_KEY = 'test-venice-key'
+    delete process.env.NANSEN_API_KEY
+
+    expect(() =>
+      resolveOpenCodeLaunchConfig({
+        agentPresetId: 'nansen-analyst',
+        agentProvider: 'venice',
+        agentModel: 'minimax-m27',
+      }),
+    ).toThrow('NANSEN_API_KEY is not configured on the server.')
+  })
+
+  test('injects both the model key and the nansen key for the nansen preset', () => {
+    process.env.VENICE_API_KEY = 'test-venice-key'
+    process.env.NANSEN_API_KEY = 'test-nansen-key'
+
+    expect(
+      resolveOpenCodeLaunchConfig({
+        agentPresetId: 'nansen-analyst',
+        agentProvider: 'venice',
+        agentModel: 'minimax-m27',
+      }),
+    ).toMatchObject({
+      preset: {
+        id: 'nansen-analyst',
+        provider: 'venice',
+        model: 'minimax-m27',
+      },
+      launchEnvironment: {
+        VENICE_API_KEY: 'test-venice-key',
+        VENICE_INFERENCE_KEY: 'test-venice-key',
+        NANSEN_API_KEY: 'test-nansen-key',
+      },
+    })
+  })
 })
 
 describe('buildOpenCodeSessionPreviewUrl', () => {

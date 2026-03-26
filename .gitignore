@@ -39,3 +39,4 @@ metamask-docs
 
 app.config.timestamp_*.js
 sources/
+.env*.local

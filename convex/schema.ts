@@ -15,10 +15,10 @@ export default defineSchema({
 
   sandboxes: defineTable({
     userId: v.id('users'),
-    repoUrl: v.string(),
+    repoUrl: v.optional(v.string()),
     repoName: v.string(),
     repoBranch: v.optional(v.string()),
-    repoProvider: v.union(v.literal('github'), v.literal('git')),
+    repoProvider: v.optional(v.union(v.literal('github'), v.literal('git'))),
     agentPresetId: v.optional(v.string()),
     agentLabel: v.optional(v.string()),
     agentProvider: v.optional(v.string()),

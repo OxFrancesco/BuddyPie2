@@ -86,6 +86,7 @@ const launchCostByPreset: Record<string, number> = {
   'general-engineer': 250,
   'frontend-builder': 250,
   'docs-writer': 250,
+  'nansen-analyst': 250,
 }
 
 const fixedEventCostsUsdCents: Record<

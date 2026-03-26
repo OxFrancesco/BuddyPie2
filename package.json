@@ -9,7 +9,7 @@
     "dev:web": "vite dev",
     "dev:convex": "bun --env-file=.env.local x convex dev",
     "build": "vite build && tsc --noEmit",
-    "test": "bun test",
+    "test": "bun test tests/*.test.js",
     "start": "node .output/server/index.mjs",
     "format": "prettier --write .",
     "lint": "tsc && eslint .  --ext ts,tsx --report-unused-disable-directives --max-warnings 0"
@@ -19,6 +19,9 @@
     "@convex-dev/react-query": "0.1.0",
     "@daytonaio/sdk": "^0.151.0",
     "@fontsource-variable/geist": "^5.2.8",
+    "@json-render/core": "^0.14.1",
+    "@json-render/react": "^0.14.1",
+    "@json-render/shadcn": "^0.14.1",
     "@metamask/delegation-toolkit": "^0.13.0",
     "@opencode-ai/sdk": "^1.2.26",
     "@tanstack/react-query": "^5.90.21",
@@ -32,6 +35,7 @@
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "convex": "^1.33.0",
+    "effect": "^3.21.0",
     "lucide-react": "^0.577.0",
     "radix-ui": "^1.4.3",
     "react": "^19.2.4",
@@ -40,7 +44,8 @@
     "shadcn": "^4.0.8",
     "tailwind-merge": "^3.5.0",
     "tw-animate-css": "^1.4.0",
-    "viem": "^2.47.4"
+    "viem": "^2.47.4",
+    "zod": "^4"
   },
   "devDependencies": {
     "@convex-dev/eslint-plugin": "^1.1.1",

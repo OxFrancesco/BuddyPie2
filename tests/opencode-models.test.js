@@ -69,6 +69,29 @@ describe('preset model defaults', () => {
     )
   })
 
+  test('defines the nansen preset with artifact guidance and the extra API key requirement', () => {
+    const preset = getOpenCodeAgentPreset('nansen-analyst')
+
+    expect(preset).toMatchObject({
+      repositoryOptional: true,
+      defaultModelOptionId: 'venice-minimax-m2.7',
+      provider: 'venice',
+      model: 'minimax-m27',
+    })
+    expect(preset.requiredEnv).toEqual(
+      expect.arrayContaining(['VENICE_API_KEY', 'NANSEN_API_KEY']),
+    )
+    expect(preset.instructionsMd).toContain('.buddypie/artifacts/current.json')
+    expect(preset.instructionsMd).toContain('write it atomically')
+    expect(preset.instructionsMd).toContain('validate the temp file before promotion')
+    expect(preset.instructionsMd).toContain('do not use leading `+` on numbers')
+    expect(preset.instructionsMd).toContain('unsupported section or field types')
+    expect(preset.instructionsMd).toContain('.buddypie/artifacts/history/')
+    expect(preset.starterPrompt).toContain('.buddypie/artifacts/current.json')
+    expect(preset.starterPrompt).toContain('Validate the temp JSON with a real parser')
+    expect(preset.starterPrompt).toContain('Archive each full validated dashboard')
+  })
+
   test('adds the shared delivery workflow to every preset prompt and instructions', () => {
     for (const preset of openCodeAgentPresets) {
       expect(preset.agentPrompt).toContain(

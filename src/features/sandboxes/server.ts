@@ -1,5 +1,6 @@
 import { createServerFn } from '@tanstack/react-start'
 import { type BillingPaymentMethod } from '../../../convex/lib/billingConfig'
+import { runServerProgram } from '~/lib/server/effect/runtime'
 import type { CreateSandboxInput, SandboxPaymentMethod } from '~/lib/sandboxes'
 
 type SandboxMutationInput = {
@@ -22,6 +23,15 @@ type GetAppPreviewLogInput = {
 type GetAppPreviewCommandSuggestionInput = {
   sandboxId: string
   port: number
+}
+
+type ReadSandboxArtifactInput = {
+  sandboxId: string
+}
+
+type SendSandboxAgentPromptInput = {
+  sandboxId: string
+  prompt: string
 }
 
 type CreateTerminalAccessInput = {
@@ -106,14 +116,16 @@ export const createSandbox = createServerFn({ method: 'POST' })
     }
 
     const { createSandboxWithPayment } = await import('./runtime.server')
-    return await createSandboxWithPayment(data, paymentMethod)
+    return await runServerProgram(
+      createSandboxWithPayment(data, paymentMethod),
+    )
   })
 
 export const deleteSandbox = createServerFn({ method: 'POST' })
   .inputValidator((data: SandboxMutationInput) => data)
   .handler(async ({ data }) => {
     const { deleteSandboxRuntime } = await import('./runtime.server')
-    return await deleteSandboxRuntime(data.sandboxId)
+    return await runServerProgram(deleteSandboxRuntime(data.sandboxId))
   })
 
 export const ensureAppPreviewServer = createServerFn({ method: 'POST' })
@@ -136,10 +148,8 @@ export const ensureAppPreviewServer = createServerFn({ method: 'POST' })
     }
 
     const { ensureAppPreviewServerWithPayment } = await import('./runtime.server')
-    return await ensureAppPreviewServerWithPayment(
-      data.sandboxId,
-      port,
-      paymentMethod,
+    return await runServerProgram(
+      ensureAppPreviewServerWithPayment(data.sandboxId, port, paymentMethod),
     )
   })
 
@@ -155,11 +165,13 @@ export const getAppPreviewLogs = createServerFn({ method: 'POST' })
     }
 
     const { getAppPreviewLogsForSandbox } = await import('./runtime.server')
-    return await getAppPreviewLogsForSandbox({
-      sandboxId: data.sandboxId,
-      port,
-      lines: data.lines,
-    })
+    return await runServerProgram(
+      getAppPreviewLogsForSandbox({
+        sandboxId: data.sandboxId,
+        port,
+        lines: data.lines,
+      }),
+    )
   })
 
 export const getAppPreviewCommandSuggestion = createServerFn({ method: 'POST' })
@@ -176,10 +188,30 @@ export const getAppPreviewCommandSuggestion = createServerFn({ method: 'POST' })
     const { getAppPreviewCommandSuggestionForSandbox } = await import(
       './runtime.server'
     )
-    return await getAppPreviewCommandSuggestionForSandbox({
-      sandboxId: data.sandboxId,
-      port,
-    })
+    return await runServerProgram(
+      getAppPreviewCommandSuggestionForSandbox({
+        sandboxId: data.sandboxId,
+        port,
+      }),
+    )
+  })
+
+export const readSandboxArtifact = createServerFn({ method: 'POST' })
+  .inputValidator((data: ReadSandboxArtifactInput) => data)
+  .handler(async ({ data }) => {
+    const { readSandboxArtifactForSandbox } = await import('./runtime.server')
+    return await runServerProgram(
+      readSandboxArtifactForSandbox({
+        sandboxId: data.sandboxId,
+      }),
+    )
+  })
+
+export const sendSandboxAgentPrompt = createServerFn({ method: 'POST' })
+  .inputValidator((data: SendSandboxAgentPromptInput) => data)
+  .handler(async ({ data }) => {
+    const { sendPromptToSandboxAgent } = await import('./runtime.server')
+    return await runServerProgram(sendPromptToSandboxAgent(data))
   })
 
 export const createTerminalAccess = createServerFn({ method: 'POST' })
@@ -194,10 +226,12 @@ export const createTerminalAccess = createServerFn({ method: 'POST' })
     }
 
     const { createTerminalAccessWithPayment } = await import('./runtime.server')
-    return await createTerminalAccessWithPayment(
-      data.sandboxId,
-      data.expiresInMinutes,
-      paymentMethod,
+    return await runServerProgram(
+      createTerminalAccessWithPayment(
+        data.sandboxId,
+        data.expiresInMinutes,
+        paymentMethod,
+      ),
     )
   })
 
@@ -219,7 +253,9 @@ export const getPortPreview = createServerFn({ method: 'POST' })
     }
 
     const { getPortPreviewWithPayment } = await import('./runtime.server')
-    return await getPortPreviewWithPayment(data.sandboxId, port, paymentMethod)
+    return await runServerProgram(
+      getPortPreviewWithPayment(data.sandboxId, port, paymentMethod),
+    )
   })
 
 export const restartSandbox = createServerFn({ method: 'POST' })
@@ -234,5 +270,7 @@ export const restartSandbox = createServerFn({ method: 'POST' })
     }
 
     const { restartSandboxWithPayment } = await import('./runtime.server')
-    return await restartSandboxWithPayment(data.sandboxId, paymentMethod)
+    return await runServerProgram(
+      restartSandboxWithPayment(data.sandboxId, paymentMethod),
+    )
   })
